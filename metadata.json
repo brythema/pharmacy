@@ -1,0 +1,8 @@
+{
+  "name": "AI Pharmacy & Nurse Service",
+  "description": "A 24/7 AI-powered clinical nurse and online pharmacy where customers can create personalized medical profiles, safety-check drug interactions, and order medications.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "PatientProfile": {
+      "title": "PatientProfile",
+      "description": "Patient personal medical file for clinical risk auditing",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Full name"
+        },
+        "age": {
+          "type": "string",
+          "description": "Patient age"
+        },
+        "gender": {
+          "type": "string",
+          "description": "Biological sex"
+        },
+        "allergies": {
+          "type": "string",
+          "description": "Known allergies and reactions"
+        },
+        "chronicConditions": {
+          "type": "string",
+          "description": "Known chronic medical conditions"
+        },
+        "currentMedications": {
+          "type": "string",
+          "description": "Ongoing medications and supplements"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Additional nurse care notes"
+        }
+      },
+      "required": ["name"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A pharmacy order transaction",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique transaction ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Patient user account ID"
+        },
+        "total": {
+          "type": "number",
+          "description": "Calculated invoice price"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["Reviewing", "Dispensed", "Ready for Pickup", "Out for Delivery", "Delivered"],
+          "description": "Courier dispatch pipeline state"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Formatted order timestamp"
+        },
+        "patientName": {
+          "type": "string",
+          "description": "Patient checkout name"
+        }
+      },
+      "required": ["id", "userId", "total", "status", "timestamp", "patientName"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "An interactive message with Nurse Sarah",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique message ID"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant"],
+          "description": "Message author source"
+        },
+        "content": {
+          "type": "string",
+          "description": "Clinical or client chat text query"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Time the message was issued"
+        }
+      },
+      "required": ["id", "role", "content", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "PatientProfile",
+      "description": "Collection of localized personal medical profiles"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection of patient order billing records"
+    },
+    "/chats/{userId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Subcollection of chat history per patient"
+    }
+  }
+}

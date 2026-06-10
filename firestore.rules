@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net - Default Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Global Helper Primitives (Phase 3)
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Role detection: Direct email whitelist + Firestore DB Admin records
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'brythema@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // 3. Validation Helpers (Phase 4)
+    function isValidProfile(data) {
+      return data.keys().hasAll(['name']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 150 &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 15)) &&
+             (!('gender' in data) || (data.gender is string && data.gender.size() <= 20)) &&
+             (!('allergies' in data) || (data.allergies is string && data.allergies.size() <= 500)) &&
+             (!('chronicConditions' in data) || (data.chronicConditions is string && data.chronicConditions.size() <= 500)) &&
+             (!('currentMedications' in data) || (data.currentMedications is string && data.currentMedications.size() <= 500)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['id', 'userId', 'total', 'status', 'timestamp', 'patientName']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
+             (data.total is int || data.total is float) && data.total >= 0.0 &&
+             data.status in ['Reviewing', 'Dispensed', 'Ready for Pickup', 'Out for Delivery', 'Delivered'] &&
+             data.timestamp is string && data.timestamp.size() <= 100 &&
+             data.patientName is string && data.patientName.size() <= 150;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'role', 'content', 'timestamp']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.role in ['user', 'assistant'] &&
+             data.content is string && data.content.size() <= 10000 &&
+             data.timestamp is string && data.timestamp.size() <= 100;
+    }
+
+    // 4. Secure Path Definition Blocks
+
+    // Patient Profile Protection
+    match /profiles/{userId} {
+      allow read: if isSignedIn() && (userId == request.auth.uid || isAdmin());
+      allow create: if isEmailVerified() && (userId == request.auth.uid || isAdmin()) && isValidProfile(request.resource.data);
+      allow update: if isEmailVerified() && (userId == request.auth.uid || isAdmin()) && isValidProfile(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // Orders Registry
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      
+      allow create: if isEmailVerified() && 
+                       isValidId(orderId) && 
+                       isValidOrder(request.resource.data);
+                       
+      allow update: if isEmailVerified() && 
+                       isValidId(orderId) && 
+                       (resource.data.userId == request.auth.uid || isAdmin()) && 
+                       request.resource.data.userId == resource.data.userId && // Immutable userId
+                       request.resource.data.id == resource.data.id && // Immutable id
+                       (isAdmin() || (
+                         resource.data.status != 'Delivered' &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+                       )) &&
+                       isValidOrder(request.resource.data);
+                       
+      allow delete: if isAdmin();
+    }
+
+    // Patient Nurse Chats
+    match /chats/{userId}/messages/{messageId} {
+      allow read, list: if isSignedIn() && (userId == request.auth.uid || isAdmin());
+      allow create: if isEmailVerified() && 
+                       (userId == request.auth.uid || isAdmin()) && 
+                       isValidId(messageId) && 
+                       isValidMessage(request.resource.data);
+      allow update, delete: if isAdmin(); // Staff / Admin can edit or delete message logs if needed
+    }
+
+    // Admin List
+    match /admins/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+  }
+}
