@@ -5,17 +5,23 @@ import { UserCheck, ShieldAlert, HeartPulse, Sparkles, X } from "lucide-react";
 interface ProfilePanelProps {
   currentProfile: PatientProfile | null;
   onSave: (profile: PatientProfile) => void;
-  onClose: () => void;
+  onClose?: () => void;
+  canClose?: boolean;
 }
 
 export default function ProfilePanel({
   currentProfile,
   onSave,
   onClose,
+  canClose = true,
 }: ProfilePanelProps) {
   const [name, setName] = useState(currentProfile?.name || "");
   const [age, setAge] = useState(currentProfile?.age || "");
   const [gender, setGender] = useState(currentProfile?.gender || "Other");
+  const [phoneNumber, setPhoneNumber] = useState(currentProfile?.phoneNumber || "");
+  const [nextOfKinName, setNextOfKinName] = useState(currentProfile?.nextOfKinName || "");
+  const [nextOfKinPhone, setNextOfKinPhone] = useState(currentProfile?.nextOfKinPhone || "");
+  const [nextOfKinRelation, setNextOfKinRelation] = useState(currentProfile?.nextOfKinRelation || "");
   const [allergies, setAllergies] = useState(currentProfile?.allergies || "");
   const [chronicConditions, setChronicConditions] = useState(
     currentProfile?.chronicConditions || ""
@@ -69,6 +75,10 @@ export default function ProfilePanel({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!nextOfKinName.trim() || !nextOfKinPhone.trim() || !nextOfKinRelation.trim()) {
+      alert("Please provide the emergency contact / next of kin details.");
+      return;
+    }
 
     onSave({
       name,
@@ -78,12 +88,17 @@ export default function ProfilePanel({
       chronicConditions,
       currentMedications,
       notes,
+      phoneNumber,
+      isConfirmed: currentProfile?.isConfirmed || false,
+      nextOfKinName,
+      nextOfKinPhone,
+      nextOfKinRelation,
     });
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-      <div className="relative w-full max-w-2xl bg-white border border-slate-205 rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden text-slate-800">
+      <form onSubmit={handleSubmit} className="relative w-full max-w-2xl bg-white border border-slate-205 rounded-2xl shadow-2xl flex flex-col max-h-[85vh] sm:max-h-[90vh] overflow-hidden text-slate-800 min-h-0">
         
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50">
@@ -100,24 +115,27 @@ export default function ProfilePanel({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-slate-150 text-slate-400 hover:text-slate-700 transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {canClose && onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-lg hover:bg-slate-150 text-slate-400 hover:text-slate-700 transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* AI Banner */}
-          <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 flex gap-3 text-xs text-slate-700 leading-relaxed font-medium">
-            <Sparkles className="w-5 h-5 text-blue-600 shrink-0" />
-            <p>
-              Your clinical safety and allergen details are analyzed locally. When you order medications or speak to <strong>Nurse Sarah</strong>, your active symptoms are safety-audited against this exact profile to catch dangerous drug conflicts automatically.
-            </p>
-          </div>
+        {/* Form Body & Footer Wrap */}
+        {/* Scrollable Form Fields area */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* AI Banner */}
+            <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-100 flex gap-3 text-xs text-slate-700 leading-relaxed font-medium">
+              <Sparkles className="w-5 h-5 text-blue-600 shrink-0" />
+              <p>
+                Your clinical safety and allergen details are analyzed locally. When you order medications or speak to <strong>Nurse Sarah</strong>, your active symptoms are safety-audited against this exact profile to catch dangerous drug conflicts automatically.
+              </p>
+            </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Name */}
@@ -163,6 +181,78 @@ export default function ProfilePanel({
                 <option value="Female">Female</option>
                 <option value="Other">Other</option>
               </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Phone Number */}
+            <div>
+              <label className="block text-xs font-bold text-slate-450 mb-1.5 uppercase font-mono tracking-wide">
+                WhatsApp Phone Number
+              </label>
+              <input
+                type="tel"
+                placeholder="e.g., 08123456789 or +234..."
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-205 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none text-sm text-slate-800 transition-all shadow-sm placeholder-slate-400"
+              />
+            </div>
+            <div>
+              <span className="text-xs text-amber-600 block mt-6 text-[11px] font-medium bg-amber-50 rounded-lg p-2 border border-amber-100">
+                🔒 Registered clients must establish a next of kin below.
+              </span>
+            </div>
+          </div>
+
+          {/* Emergency Contact Section */}
+          <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-4">
+            <h4 className="text-xs font-bold font-mono uppercase text-slate-600 tracking-wider">
+              Emergency Contact / Next of Kin (Required)
+            </h4>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase font-mono">
+                  Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Jane Smith"
+                  value={nextOfKinName}
+                  onChange={(e) => setNextOfKinName(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 transition-all shadow-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase font-mono">
+                  Phone Number *
+                </label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="e.g., 08023456789"
+                  value={nextOfKinPhone}
+                  onChange={(e) => setNextOfKinPhone(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 transition-all shadow-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase font-mono">
+                  Relationship *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g., Spouse, Mother"
+                  value={nextOfKinRelation}
+                  onChange={(e) => setNextOfKinRelation(e.target.value)}
+                  className="w-full px-3 py-1.5 rounded-lg bg-white border border-slate-200 focus:ring-1 focus:ring-blue-500 text-xs text-slate-800 transition-all shadow-sm"
+                />
+              </div>
             </div>
           </div>
 
@@ -266,26 +356,28 @@ export default function ProfilePanel({
               className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-205 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none text-sm transition-all shadow-sm placeholder-slate-400 text-slate-800"
             />
           </div>
-        </form>
 
-        {/* Footer actions */}
-        <div className="p-5 border-t border-slate-150 bg-slate-50 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-slate-655 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            onClick={handleSubmit}
-            className="px-5 py-2 text-sm font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition cursor-pointer flex items-center gap-2"
-          >
-            Save Risk Profile
-          </button>
-        </div>
-      </div>
+          </div>
+
+          {/* Footer actions inside the form */}
+          <div className="p-5 border-t border-slate-150 bg-slate-50 flex items-center justify-end gap-3 shrink-0">
+            {canClose && onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 text-sm text-slate-655 font-bold bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-5 py-2 text-sm font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm transition cursor-pointer flex items-center gap-2"
+            >
+              Save Clinical Record & Register
+            </button>
+          </div>
+      </form>
     </div>
   );
 }

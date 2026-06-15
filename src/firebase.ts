@@ -1,12 +1,34 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, doc, setDoc } from "firebase/firestore";
+import { getStorage } from "firebase/storage";
 import firebaseConfig from "../firebase-applet-config.json";
+import { SystemNotification } from "./types";
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+export const storage = getStorage(app);
 export const googleProvider = new GoogleAuthProvider();
+
+export async function createNotification(notification: Omit<SystemNotification, "id" | "read" | "timestamp" | "createdAt">) {
+  const id = "notif-" + Date.now() + "-" + Math.floor(Math.random() * 1000);
+  const newNotif: SystemNotification = {
+    id,
+    ...notification,
+    read: false,
+    timestamp: new Date().toLocaleDateString() + ", " + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    createdAt: Date.now()
+  };
+  try {
+    await setDoc(doc(db, "notifications", id), newNotif);
+    return newNotif;
+  } catch (error) {
+    console.warn("Failed to create notification on Firestore:", error);
+    return null;
+  }
+}
+
 
 export enum OperationType {
   CREATE = "create",

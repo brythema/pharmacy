@@ -7,8 +7,17 @@ interface CartProps {
   onRemoveFromCart: (drugId: string) => void;
   onUpdateQty: (drugId: string, qty: number) => void;
   profile: PatientProfile | null;
-  onCheckout: () => void;
+  onCheckout: (auditReportText?: string | null) => void;
   onOpenProfile: () => void;
+  tenantConfig?: {
+    pharmacyName: string;
+    nurseName: string;
+    logoUrl: string;
+    themeColor: string;
+    pharmacyAddress: string;
+    whatsappNumber: string;
+  };
+  isCheckingOut?: boolean;
 }
 
 export default function Cart({
@@ -18,6 +27,8 @@ export default function Cart({
   profile,
   onCheckout,
   onOpenProfile,
+  tenantConfig,
+  isCheckingOut = false,
 }: CartProps) {
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditReport, setAuditReport] = useState<string | null>(null);
@@ -38,6 +49,7 @@ export default function Cart({
         body: JSON.stringify({
           cartItems: cartItems.map((c) => c.drug),
           profile: profile || {},
+          tenantConfig: tenantConfig,
         }),
       });
 
@@ -57,7 +69,7 @@ export default function Cart({
   };
 
   const handlePlaceOrder = () => {
-    onCheckout();
+    onCheckout(auditReport);
   };
 
   // Helper inside report modal to structure bullets/headers elegantly
@@ -339,11 +351,21 @@ export default function Cart({
               {/* Checkout / Invoice */}
               <button
                 type="button"
+                disabled={isCheckingOut}
                 onClick={handlePlaceOrder}
-                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black tracking-tight text-sm shadow-sm transition duration-200 cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black tracking-tight text-sm shadow-sm transition duration-200 cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ShoppingBag className="w-4 h-4 stroke-[2.5]" />
-                <span>Place Order & Arrange Delivery</span>
+                {isCheckingOut ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Processing Order...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingBag className="w-4 h-4 stroke-[2.5]" />
+                    <span>Place Order & Arrange Delivery</span>
+                  </>
+                )}
               </button>
 
             </div>

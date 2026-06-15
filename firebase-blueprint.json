@@ -32,9 +32,29 @@
         "notes": {
           "type": "string",
           "description": "Additional nurse care notes"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "WhatsApp contact phone"
+        },
+        "isConfirmed": {
+          "type": "boolean",
+          "description": "Clinical verification state"
+        },
+        "nextOfKinName": {
+          "type": "string",
+          "description": "Emergency contact name"
+        },
+        "nextOfKinPhone": {
+          "type": "string",
+          "description": "Emergency contact phone"
+        },
+        "nextOfKinRelation": {
+          "type": "string",
+          "description": "Emergency contact relation"
         }
       },
-      "required": ["name"]
+      "required": ["name", "nextOfKinName", "nextOfKinPhone", "nextOfKinRelation"]
     },
     "Order": {
       "title": "Order",
@@ -93,9 +113,113 @@
         }
       },
       "required": ["id", "role", "content", "timestamp"]
+    },
+    "AdminRecord": {
+      "title": "AdminRecord",
+      "description": "Staff role and permission mappings for the clinic console",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "permissions": { "type": "object" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["email", "role", "permissions"]
+    },
+    "Drug": {
+      "title": "Drug",
+      "description": "Information about a medication",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "price": { "type": "number" },
+        "image": { "type": "string" },
+        "ingredients": { "type": "string" },
+        "dosage": { "type": "string" },
+        "directions": { "type": "string" },
+        "warnings": { "type": "string" },
+        "requiresPrescription": { "type": "boolean" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "price", "ingredients", "requiresPrescription", "description"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Persistent real-time notification events in the patient EHR workspace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string", "description": "Recipient patient uid, or 'admin' for staff alerts" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string", "enum": ["registration", "prescriptionUpload", "orderPlaced", "customerMessage", "orderUpdate", "prescriptionApproval", "prescriptionRejection", "adminMessage", "medicationReminder"] },
+        "read": { "type": "boolean" },
+        "timestamp": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "read", "timestamp", "createdAt"]
+    },
+    "SupportRoom": {
+      "title": "SupportRoom",
+      "description": "High-priority pharmacist support helpdesk issue tracker",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "topic": { "type": "string" },
+        "status": { "type": "string", "enum": ["open", "closed"] },
+        "createdAt": { "type": "number" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageAt": { "type": "number" },
+        "userUnreadCount": { "type": "number" },
+        "adminUnreadCount": { "type": "number" },
+        "pharmacyId": { "type": "string" }
+      },
+      "required": ["id", "userId", "userName", "userEmail", "topic", "status", "createdAt", "lastMessageText", "lastMessageAt", "userUnreadCount", "adminUnreadCount", "pharmacyId"]
+    },
+    "SupportMessage": {
+      "title": "SupportMessage",
+      "description": "Real-time communication timeline message for helpdesk issue",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["patient", "admin"] },
+        "content": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "isRead": { "type": "boolean" },
+        "readAt": { "type": "number" }
+      },
+      "required": ["id", "senderId", "senderName", "senderRole", "content", "createdAt", "isRead"]
     }
   },
   "firestore": {
+    "/support_rooms/{roomId}": {
+      "schema": "SupportRoom",
+      "description": " pharmacist customer helpdesk workspace tickets"
+    },
+    "/support_rooms/{roomId}/messages/{messageId}": {
+      "schema": "SupportMessage",
+      "description": "Thread timelines of communication on a specific ticket"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Dynamic persisted operational and client alert logs"
+    },
+    "/inventory/{drugId}": {
+      "schema": "Drug",
+      "description": "Persistent clinical catalog of medicines and drugs"
+    },
+    "/admins/{userId}": {
+      "schema": "AdminRecord",
+      "description": "Clinic staff and rbac security permissions registry"
+    },
     "/profiles/{userId}": {
       "schema": "PatientProfile",
       "description": "Collection of localized personal medical profiles"
@@ -104,9 +228,17 @@
       "schema": "Order",
       "description": "Collection of patient order billing records"
     },
+    "/pharmacies/{pharmacyId}/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Multi-tenant persistent customer orders"
+    },
     "/chats/{userId}/messages/{messageId}": {
       "schema": "Message",
       "description": "Subcollection of chat history per patient"
+    },
+    "/pharmacies/{pharmacyId}/chats/{userId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Multi-tenant subcollection of clinical responses"
     }
   }
 }

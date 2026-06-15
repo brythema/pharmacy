@@ -1,0 +1,25 @@
+{
+  "name": "CareMed Smart Clinical Pharmacy",
+  "short_name": "CareMed",
+  "description": "Multi-tenant clinical pharmacy platform with AI nurse health tracking, contraindication auditing, and automated WhatsApp delivery integrations.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "categories": ["medical", "health", "shopping"],
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

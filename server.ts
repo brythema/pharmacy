@@ -45,6 +45,7 @@ async function generateTextWithFallback(options: {
     const maxAttempts = isFirstModel ? 1 : 2;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const timeoutDuration = isFirstModel ? 25000 : 30000;
       try {
         console.log(`Attempting generateContent using model: ${model} (attempt ${attempt}/${maxAttempts})`);
         
@@ -57,8 +58,6 @@ async function generateTextWithFallback(options: {
           },
         });
 
-        // Timeout limit set to 6.5 seconds (between 5 and 10 seconds) for the first model, 7.5 seconds for subsequent fallbacks
-        const timeoutDuration = isFirstModel ? 6500 : 7500;
         const timeoutPromise = new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("TIMEOUT_OUTAGE")), timeoutDuration)
         );
@@ -91,7 +90,7 @@ async function generateTextWithFallback(options: {
         console.warn(`Model ${model} request failed on attempt ${attempt}:`, err?.message || err);
 
         if (err?.message === "TIMEOUT_OUTAGE") {
-          console.log(`Model ${model} timed out after ${isFirstModel ? 6500 : 7500}ms. Skipping remaining attempts on this model to fallback immediately.`);
+          console.log(`Model ${model} timed out after ${timeoutDuration}ms. Skipping remaining attempts on this model to fallback immediately.`);
           break; // Fallback to the next model immediately
         }
 
@@ -125,19 +124,23 @@ async function generateTextWithFallback(options: {
 // Nurse Chat Endpoint
 app.post("/api/nurse/chat", async (req, res) => {
   try {
-    const { messages, profile, pendingDrugContext } = req.body;
+    const { messages, profile, pendingDrugContext, tenantConfig } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ error: "Missing or invalid messages parameter." });
       return;
     }
 
+    const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+    const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
+    const pharmacyAddress = tenantConfig?.pharmacyAddress || "Abuja, Nigeria";
+
     // Construct precise system instructions with client context
     let profileContext = `
 No personalized medical profile is specified on this active session. This is a generic patient guest inquiry (anonymous/non-registered).
 Because the user does not have an active registered account:
 - You must answer their general clinical or medical questions in a highly supportive, professional, and comforting manner.
-- Crucially, EVERY single response you generate MUST naturally, gracefully, and helpfully direct or bring the user to the H-Medix Pharmacy portal (e.g., lookup drugs by visiting our "Order Drugs" catalog tab, browse appropriate therapeutic categories, or add medications to their checkout cart).
+- Crucially, EVERY single response you generate MUST naturally, gracefully, and helpfully direct or bring the user to the ${pharmacyName} Pharmacy portal (e.g., lookup drugs by visiting our "Order Drugs" catalog tab, browse appropriate therapeutic categories, or add medications to their checkout cart).
 - Remind them that register/login (linking a secure medical profile) is strongly advised, as it equips you to check drugs automatically for severe contraindications against their personal allergies, chronic conditions, and concurrent meds.
 `;
     if (profile && Object.keys(profile).length > 0) {
@@ -168,14 +171,14 @@ Proactively check if they can safely use this drug based on their medical profil
     }
 
     const systemInstruction = `
-You are safe, empathetic, and professional: "Nurse Sarah", a virtual AI Clinical Nurse specialized in pharmacy consultations and triage at H-Medix Pharmacy, Nigeria. All prices listed on our portal are in Nigerian Naira (₦).
+You are safe, empathetic, and professional: "${nurseName}", a virtual AI Clinical Nurse specialized in pharmacy consultations and triage at ${pharmacyName} Pharmacy, Nigeria. All prices listed on our portal are in Nigerian Naira (₦).
 
 CRITICAL RESPONSIBILITIES & CONSTRAINTS:
 1. **Medical Emergencies**: If the user's inquiry signals a medical emergency (e.g., chest pain, severe breathing trouble, major bleeding, sudden numbness, anaphylaxis), you MUST direct them to local emergency services (such as 112 or local equivalents in Nigeria) or call a care professional immediately, in bold, clinical, comforting terms.
 2. **Personalized Safety & Drug-Interaction Auditing**: Use the provided medical profile context to detect severe drug interactions, duplicate therapy, or illness conflicts. For example, if they take blood thinners, warn about NSAIDs (Advil). If they have chronic kidney disease, look out for nephrotoxic compounds. If they are allergic to penicillin, warn if penicillin-type antibiotics are in question.
 3. **Conversational Tone**: Sound warm, highly intelligent, precise, and compassionate. Do not sound robotic. Never list instructions blindly; structure your advice beautifully with spacing or lists. Speak in Naira (₦) for any billing discussion.
 4. **Professional Medical Disclaimer**: Always speak with authority but maintain a mandatory disclaimer that you are an AI Nurse assisting them and they should consult a prescribing physician or pharmacist for medical decisions.
-5. **Call to Action / Routing**: Encourage them to complete their purchase safely online, or to let you audit their cart before check-out, or suggest contacting one of our physical H-Medix pharmacy locations (such as in Abuja) for in-person local support. For guest users who are not registered, you MUST tailor every single response with clear call-to-actions that guide them directly to our virtual drug shelves, ordering paths, or account sign-in/registration panels.
+5. **Call to Action / Routing**: Encourage them to complete their purchase safely online, or to let you audit their cart before check-out, or suggest contacting one of our physical ${pharmacyName} pharmacy locations (such as in ${pharmacyAddress}) for in-person local support. For guest users who are not registered, you MUST tailor every single response with clear call-to-actions that guide them directly to our virtual drug shelves, ordering paths, or account sign-in/registration panels.
 
 ACTIVE CLIENT CLINICAL BACKGROUND:
 ${profileContext}
@@ -226,12 +229,15 @@ ${drugFocusContext}
 // Nurse Cart Safety Audit Route
 app.post("/api/nurse/cart-audit", async (req, res) => {
   try {
-    const { cartItems, profile } = req.body;
+    const { cartItems, profile, tenantConfig } = req.body;
 
     if (!cartItems || !Array.isArray(cartItems)) {
       res.status(400).json({ error: "Missing or invalid cartItems parameter." });
       return;
     }
+
+    const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+    const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
 
     let profileContext = "No personalized medical profile is specified.";
     if (profile && Object.keys(profile).length > 0) {
@@ -254,7 +260,7 @@ app.post("/api/nurse/cart-audit", async (req, res) => {
       .join("\n");
 
     const systemInstruction = `
-You are Nurse Sarah, a rigorous AI Clinical Safety Auditor at H-Medix Pharmacy, Nigeria.
+You are ${nurseName}, a rigorous AI Clinical Safety Auditor at ${pharmacyName} Pharmacy, Nigeria.
 Your job is to run a pharmaceutical interaction and allergy audit on the items in the user's cart against their clinical profile. All transaction billing references are in Nigerian Naira (₦).
 
 Provide a highly organized, professional markdown clinical safety report with three sections:
