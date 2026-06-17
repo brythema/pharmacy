@@ -41,6 +41,7 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
   const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
 
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [showResetFlow, setShowResetFlow] = useState<boolean>(false);
   const [email, setEmail] = useState<string>("");
   const [password, setPassword] = useState<string>("");
   const [confirmPassword, setConfirmPassword] = useState<string>("");
@@ -368,91 +369,99 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
           <div className="space-y-5">
             <div className="text-center sm:text-left">
               <h3 className="font-display font-extrabold text-slate-900 text-xl tracking-tight">
-                Healthcare Security Login
+                {showResetFlow ? "Access Key Recovery" : "Healthcare Security Login"}
               </h3>
               <p className="text-[10px] text-slate-400 font-mono uppercase tracking-widest block mt-1">
-                EHR Cryptographic Access Portal
+                {showResetFlow ? "Credential Retrieval Protocol" : "EHR Cryptographic Access Portal"}
               </p>
             </div>
 
-            {/* Sliding Header Mode Selection Tabs */}
-            <div className="relative grid grid-cols-2 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-250">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("login");
-                  setValidationError(null);
-                  setSuccessMsg(null);
-                }}
-                className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
-                  mode === "login"
-                    ? "bg-white text-slate-900 shadow-md font-extrabold"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <LockKeyhole className="w-3.5 h-3.5" />
-                <span>Sign In</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("register");
-                  setValidationError(null);
-                  setSuccessMsg(null);
-                }}
-                className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
-                  mode === "register"
-                    ? "bg-white text-slate-900 shadow-md font-extrabold"
-                    : "text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                <FileCheck2 className="w-3.5 h-3.5" />
-                <span>Register Care Account</span>
-              </button>
-            </div>
+            {!showResetFlow ? (
+              <>
+                {/* Sliding Header Mode Selection Tabs */}
+                <div className="relative grid grid-cols-2 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-250">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("login");
+                      setValidationError(null);
+                      setSuccessMsg(null);
+                    }}
+                    className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
+                      mode === "login"
+                        ? "bg-white text-slate-900 shadow-md font-extrabold"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <LockKeyhole className="w-3.5 h-3.5" />
+                    <span>Sign In</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("register");
+                      setValidationError(null);
+                      setSuccessMsg(null);
+                    }}
+                    className={`flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
+                      mode === "register"
+                        ? "bg-white text-slate-900 shadow-md font-extrabold"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    <FileCheck2 className="w-3.5 h-3.5" />
+                    <span>Register Care Account</span>
+                  </button>
+                </div>
 
-            {/* Google & Apple Professional Options */}
-            <div className="space-y-2 mt-2">
-              <div className="flex flex-col gap-2">
-                {/* Continue with Google */}
-                <button
-                  type="button"
-                  onClick={triggerGoogleSignIn}
-                  disabled={isBusy}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all disabled:opacity-50"
-                  title="Authenticate via Google SSO"
-                >
-                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                    <path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.37 0 3.383 2.55 1.258 6.355l4.008 3.41z"/>
-                    <path fill="#4285F4" d="M23.04 12.261c0-.83-.075-1.62-.211-2.386H12v4.51h6.2a5.3 5.3 0 0 1-2.29 3.477l3.562 3.033c2.083-1.92 3.28-4.755 3.28-8.15c0-.16-.01-.322-.012-.484z"/>
-                    <path fill="#FBBC05" d="M1.258 6.355A12.003 12.003 0 0 0 0 12c0 2.016.5 3.916 1.385 5.602l3.89-3.26a7.07 7.07 0 0 1-.03-2.342C5.232 11.168 5.232 10.455 5.266 9.765z"/>
-                    <path fill="#34A853" d="M12 24c3.24 0 5.955-1.075 7.94-2.914l-3.562-3.033A7.126 7.126 0 0 1 12 19.091a7.07 7.07 0 0 1-6.734-4.856L1.376 17.5A11.968 11.968 0 0 0 12 24z"/>
-                  </svg>
-                  <span>Continue with Google</span>
-                </button>
+                {/* Google & Apple Professional Options */}
+                <div className="space-y-2 mt-2">
+                  <div className="flex flex-col gap-2">
+                    {/* Continue with Google */}
+                    <button
+                      type="button"
+                      onClick={triggerGoogleSignIn}
+                      disabled={isBusy}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all disabled:opacity-50"
+                      title="Authenticate via Google SSO"
+                    >
+                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                        <path fill="#EA4335" d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582L19.91 3C17.782 1.145 15.055 0 12 0 7.37 0 3.383 2.55 1.258 6.355l4.008 3.41z"/>
+                        <path fill="#4285F4" d="M23.04 12.261c0-.83-.075-1.62-.211-2.386H12v4.51h6.2a5.3 5.3 0 0 1-2.29 3.477l3.562 3.033c2.083-1.92 3.28-4.755 3.28-8.15c0-.16-.01-.322-.012-.484z"/>
+                        <path fill="#FBBC05" d="M1.258 6.355A12.003 12.003 0 0 0 0 12c0 2.016.5 3.916 1.385 5.602l3.89-3.26a7.07 7.07 0 0 1-.03-2.342C5.232 11.168 5.232 10.455 5.266 9.765z"/>
+                        <path fill="#34A853" d="M12 24c3.24 0 5.955-1.075 7.94-2.914l-3.562-3.033A7.126 7.126 0 0 1 12 19.091a7.07 7.07 0 0 1-6.734-4.856L1.376 17.5A11.968 11.968 0 0 0 12 24z"/>
+                      </svg>
+                      <span>Continue with Google</span>
+                    </button>
 
-                {/* Continue with Apple */}
-                <button
-                  type="button"
-                  onClick={handleApplePlaceholderClick}
-                  disabled={isBusy}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-slate-900 hover:bg-slate-850 text-white text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all disabled:opacity-50"
-                  title="Authenticate via Apple ID"
-                >
-                  <svg className="w-4 h-4 text-white fill-current shrink-0" viewBox="0 0 24 24">
-                    <path d="M18.71,19.5 C17.88,20.74 17,21.95 15.66,21.97 C14.32,22 13.89,21.18 12.37,21.18 C10.84,21.18 10.37,21.95 9.1,22 C7.79,22.05 6.8,20.68 5.96,19.48 C4.25,17 2.94,12.45 4.7,9.39 C5.57,7.87 7.13,6.91 8.82,6.88 C10.1,6.86 11.32,7.75 12.11,7.75 C12.89,7.75 14.37,6.68 15.92,6.84 C16.57,6.87 18.39,7.1 19.56,8.82 C19.47,8.88 17.39,10.1 17.41,12.63 C17.44,15.65 20.06,16.66 20.1,16.67 C20.08,16.74 19.67,18.11 18.71,19.5 M15.97,4.17 C16.63,3.37 17.07,2.28 16.95,1 C16,1.04 14.9,1.6 14.24,2.38 C13.68,3.04 13.19,4.14 13.34,5.39 C14.39,5.47 15.4,4.88 15.97,4.17 Z" />
-                  </svg>
-                  <span>Continue with Apple</span>
-                </button>
+                    {/* Continue with Apple */}
+                    <button
+                      type="button"
+                      onClick={handleApplePlaceholderClick}
+                      disabled={isBusy}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-slate-900 hover:bg-slate-850 text-white text-xs font-bold rounded-xl shadow-sm cursor-pointer transition-all disabled:opacity-50"
+                      title="Authenticate via Apple ID"
+                    >
+                      <svg className="w-4 h-4 text-white fill-current shrink-0" viewBox="0 0 24 24">
+                        <path d="M18.71,19.5 C17.88,20.74 17,21.95 15.66,21.97 C14.32,22 13.89,21.18 12.37,21.18 C10.84,21.18 10.37,21.95 9.1,22 C7.79,22.05 6.8,20.68 5.96,19.48 C4.25,17 2.94,12.45 4.7,9.39 C5.57,7.87 7.13,6.91 8.82,6.88 C10.1,6.86 11.32,7.75 12.11,7.75 C12.89,7.75 14.37,6.68 15.92,6.84 C16.57,6.87 18.39,7.1 19.56,8.82 C19.47,8.88 17.39,10.1 17.41,12.63 C17.44,15.65 20.06,16.66 20.1,16.67 C20.08,16.74 19.67,18.11 18.71,19.5 M15.97,4.17 C16.63,3.37 17.07,2.28 16.95,1 C16,1.04 14.9,1.6 14.24,2.38 C13.68,3.04 13.19,4.14 13.34,5.39 C14.39,5.47 15.4,4.88 15.97,4.17 Z" />
+                      </svg>
+                      <span>Continue with Apple</span>
+                    </button>
+                  </div>
+
+                  <div className="relative my-4 flex items-center justify-center text-slate-350">
+                    <div className="absolute inset-x-0 h-[1.5px] bg-slate-150" />
+                    <span className="relative bg-white px-3 text-[9px] font-bold uppercase font-mono tracking-wider text-slate-400">
+                      or sync with secure email credentials
+                    </span>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="p-3.5 bg-blue-50/50 border border-blue-100 rounded-2xl text-[11px] text-slate-650 leading-relaxed font-sans text-left my-2">
+                🗝️ <strong>Secure Credential Reset:</strong> Enter your registered patient email address below. Our server will dispatch clinical password-update procedures straight to your inbox.
               </div>
-
-              <div className="relative my-4 flex items-center justify-center text-slate-350">
-                <div className="absolute inset-x-0 h-[1.5px] bg-slate-150" />
-                <span className="relative bg-white px-3 text-[9px] font-bold uppercase font-mono tracking-wider text-slate-400">
-                  or sync with secure email credentials
-                </span>
-              </div>
-            </div>
+            )}
 
             {/* Animated Feedback Messages */}
             <AnimatePresence mode="wait">
@@ -487,167 +496,223 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
               )}
             </AnimatePresence>
 
-            {/* Dynamic Card Form Height via Motion layout */}
-            <form onSubmit={handleSubmit} className="space-y-4 text-left">
+            <form onSubmit={(e) => {
+              if (showResetFlow) {
+                e.preventDefault();
+                handleForgotPassword();
+              } else {
+                handleSubmit(e);
+              }
+            }} className="space-y-4 text-left">
               
-              {/* Conditional Registration Fields */}
-              <AnimatePresence initial={false}>
-                {mode === "register" && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="overflow-hidden space-y-4"
-                  >
-                    {/* Full Name field */}
-                    <div>
-                      <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
-                        Patient Full Name <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                          <User className="w-4 h-4" />
-                        </span>
-                        <input
-                          type="text"
-                          required
-                          value={fullName}
-                          onChange={(e) => setFullName(e.target.value)}
-                          placeholder="e.g. Juliet Alagboda"
-                          className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-sans"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Phone Number field */}
-                    <div>
-                      <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
-                        Mobile Phone Number <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                          <Phone className="w-4 h-4" />
-                        </span>
-                        <input
-                          type="tel"
-                          required
-                          value={phoneNumber}
-                          onChange={(e) => setPhoneNumber(e.target.value)}
-                          placeholder="e.g. +234 803 123 4567"
-                          className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
-                        />
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Shared Email Address field */}
-              <div>
-                <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
-                  Email Address / Username <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <Mail className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="text"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. patient@caremed.org"
-                    className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-sans"
-                  />
-                </div>
-              </div>
-
-              {/* Password field */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="block text-[10px] font-mono font-bold uppercase text-slate-450">
-                    Secure Password <span className="text-red-500">*</span>
-                  </label>
-                  {mode === "login" && (
-                    <button
-                      type="button"
-                      onClick={handleForgotPassword}
-                      disabled={isBusy}
-                      className="text-[10px] font-mono uppercase font-bold text-blue-600 hover:text-blue-800 focus:outline-none transition cursor-pointer"
-                    >
-                      Forgot Access Key?
-                    </button>
-                  )}
-                </div>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <Lock className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Password Confirm (Register only) */}
-              <AnimatePresence initial={false}>
-                {mode === "register" && (
-                  <motion.div
-                    initial={{ height: 0, opacity: 0 }}
-                    animate={{ height: "auto", opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }}
-                    className="overflow-hidden space-y-2"
-                  >
-                    <div>
-                      <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
-                        Confirm Secure Password <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                          <Lock className="w-4 h-4" />
-                        </span>
-                        <input
-                          type="password"
-                          required
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="••••••••"
-                          className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Terms Checkbox */}
-                    <div className="flex items-start gap-2.5 pt-2">
-                      <input 
-                        type="checkbox"
-                        id="agreeTerms"
-                        checked={agreeTerms}
-                        onChange={(e) => setAgreeTerms(e.target.checked)}
-                        className="mt-0.5 rounded border-slate-300 focus:ring-blue-500 text-blue-600 h-3.5 w-3.5"
+              {showResetFlow ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
+                      Your Registered Email Address <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="e.g. patient@caremed.org"
+                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-sans"
                       />
-                      <label htmlFor="agreeTerms" className="text-[10px] text-slate-500 leading-snug cursor-pointer select-none">
-                        I authorize CareMed platforms to synchronize my compliance record with local pharmacist review queues in accord with standard clinical privacy standards.
-                      </label>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                  </div>
 
-              {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={isBusy}
-                className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl shadow-md cursor-pointer transition-all disabled:opacity-55 mt-4"
-              >
-                <span>{mode === "login" ? "Access Medical Portal" : "Complete Safety Registration"}</span>
-                <ArrowRight className="w-4 h-4 text-white" />
-              </button>
+                  <button
+                    type="submit"
+                    disabled={isBusy}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl shadow-md cursor-pointer transition-all disabled:opacity-55 mt-4"
+                  >
+                    <span>Dispatch Recovery Email</span>
+                    <ArrowRight className="w-4 h-4 text-white" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetFlow(false);
+                      setValidationError(null);
+                      setSuccessMsg(null);
+                    }}
+                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-mono uppercase font-bold rounded-xl cursor-pointer transition-all border border-slate-200 text-center"
+                  >
+                    ← Return to Login Portal
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Conditional Registration Fields */}
+                  <AnimatePresence initial={false}>
+                    {mode === "register" && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden space-y-4"
+                      >
+                        {/* Full Name field */}
+                        <div>
+                          <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
+                            Patient Full Name <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <User className="w-4 h-4" />
+                            </span>
+                            <input
+                              type="text"
+                              required
+                              value={fullName}
+                              onChange={(e) => setFullName(e.target.value)}
+                              placeholder="e.g. Juliet Alagboda"
+                              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-sans"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Phone Number field */}
+                        <div>
+                          <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
+                            Mobile Phone Number <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <Phone className="w-4 h-4" />
+                            </span>
+                            <input
+                              type="tel"
+                              required
+                              value={phoneNumber}
+                              onChange={(e) => setPhoneNumber(e.target.value)}
+                              placeholder="e.g. +234 803 123 4567"
+                              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
+                            />
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Shared Email Address field */}
+                  <div>
+                    <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
+                      Email Address / Username <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                        <Mail className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="e.g. patient@caremed.org"
+                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password field */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="block text-[10px] font-mono font-bold uppercase text-slate-450">
+                        Secure Password <span className="text-red-500">*</span>
+                      </label>
+                      {mode === "login" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowResetFlow(true);
+                            setValidationError(null);
+                            setSuccessMsg(null);
+                          }}
+                          disabled={isBusy}
+                          className="text-[10px] font-mono uppercase font-bold text-blue-600 hover:text-blue-800 focus:outline-none transition cursor-pointer"
+                        >
+                          Forgot Access Key?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                        <Lock className="w-4 h-4" />
+                      </span>
+                      <input
+                        type="password"
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Password Confirm (Register only) */}
+                  <AnimatePresence initial={false}>
+                    {mode === "register" && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: "auto", opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        className="overflow-hidden space-y-2"
+                      >
+                        <div>
+                          <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
+                            Confirm Secure Password <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                              <Lock className="w-4 h-4" />
+                            </span>
+                            <input
+                              type="password"
+                              required
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              placeholder="••••••••"
+                              className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 focus:shadow-sm transition-all font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Terms Checkbox */}
+                        <div className="flex items-start gap-2.5 pt-2">
+                          <input 
+                            type="checkbox"
+                            id="agreeTerms"
+                            checked={agreeTerms}
+                            onChange={(e) => setAgreeTerms(e.target.checked)}
+                            className="mt-0.5 rounded border-slate-300 focus:ring-blue-500 text-blue-600 h-3.5 w-3.5"
+                          />
+                          <label htmlFor="agreeTerms" className="text-[10px] text-slate-500 leading-snug cursor-pointer select-none">
+                            I authorize CareMed platforms to synchronize my compliance record with local pharmacist review queues in accord with standard clinical privacy standards.
+                          </label>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Submit Button */}
+                  <button
+                    type="submit"
+                    disabled={isBusy}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl shadow-md cursor-pointer transition-all disabled:opacity-55 mt-4"
+                  >
+                    <span>{mode === "login" ? "Access Medical Portal" : "Complete Safety Registration"}</span>
+                    <ArrowRight className="w-4 h-4 text-white" />
+                  </button>
+                </>
+              )}
             </form>
           </div>
         </div>

@@ -24,7 +24,8 @@ import {
   HeartPulse,
   Info,
   Check,
-  Send
+  Send,
+  BellRing
 } from "lucide-react";
 import { Drug, PatientProfile, Order, CartItem, SystemNotification, Message } from "../types";
 import { storage, db, handleFirestoreError, OperationType, createNotification, auth } from "../firebase";
@@ -121,6 +122,10 @@ export default function Dashboard({
   // Notification states and local dismissal layer
   const [dismissedIds, setDismissedIds] = useState<string[]>([]);
 
+  // Interactive full dialog view states for Patient Profile & Notification panels
+  const [isProfileDetailsOpen, setIsProfileDetailsOpen] = useState(false);
+  const [isNotificationsListOpen, setIsNotificationsListOpen] = useState(false);
+
   // Update form fields if profile changes
   useEffect(() => {
     if (profile) {
@@ -133,7 +138,264 @@ export default function Dashboard({
     }
   }, [profile]);
 
+
+  // --- Start of Medication Reminders State ---
+  interface MedReminder {
+    id: string;
+    medicationName: string;
+    dosage: string;
+    time: string; // e.g. "08:00"
+    frequency: "Once daily" | "Twice daily" | "Three times daily" | "Four times daily" | "As needed";
+    foodInstruction: "None" | "With food" | "Before food" | "After food" | "Empty stomach";
+    enabled: boolean;
+    notes?: string;
+    lastAdherenceLogTime?: string;
+    createdAt: string;
+  }
+
+  interface AdherenceLog {
+    id: string;
+    reminderId: string;
+    medicationName: string;
+    dosage: string;
+    loggedTime: string;
+    status: "Taken" | "Skipped" | "Snoozed";
+  }
+
+  const [remindersList, setRemindersList] = useState<MedReminder[]>(() => {
+    try {
+      const saved = localStorage.getItem("caremed_daily_reminders");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [adherenceLogs, setAdherenceLogs] = useState<AdherenceLog[]>(() => {
+    try {
+      const saved = localStorage.getItem("caremed_reminders_adherence");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [isAddReminderOpen, setIsAddReminderOpen] = useState(false);
+  const [newReminderForm, setNewReminderForm] = useState({
+    medicationName: "",
+    dosage: "1 Tablet",
+    time: "08:00",
+    frequency: "Once daily" as const,
+    foodInstruction: "With food" as const,
+    notes: ""
+  });
+
+  const [activeAlertNotification, setActiveAlertNotification] = useState<{
+    id: string;
+    reminder: MedReminder;
+    show: boolean;
+  } | null>(null);
+
+  const [activeRemindersTab, setActiveRemindersTab] = useState<"reminders" | "logs">("reminders");
+
+  const [reminderToast, setReminderToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  const showReminderToast = (msg: string, type: "success" | "error" = "success") => {
+    setReminderToast({ message: msg, type });
+    setTimeout(() => {
+      setReminderToast(null);
+    }, 4000);
+  };
+
+  useEffect(() => {
+    localStorage.setItem("caremed_daily_reminders", JSON.stringify(remindersList));
+  }, [remindersList]);
+
+  useEffect(() => {
+    localStorage.setItem("caremed_reminders_adherence", JSON.stringify(adherenceLogs));
+  }, [adherenceLogs]);
+
+  // Audio synthesizer for reminder alerts (Pure browser Web Audio API oscillator synthesis)
+  const playReminderSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+      oscillator.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+      oscillator.frequency.setValueAtTime(1174.66, audioCtx.currentTime + 0.3); // D6
+      
+      gainNode.gain.setValueAtTime(0.35, audioCtx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+      
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.6);
+    } catch (e) {
+      console.error("Audio Web API was blocked or inactive:", e);
+    }
+  };
+
+  // Text-to-speech speaker output representation
+  const speakReminder = (text: string) => {
+    try {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 1.0;
+        utterance.pitch = 1.1;
+        window.speechSynthesis.speak(utterance);
+      }
+    } catch (e) {
+      console.error("Voice output failed:", e);
+    }
+  };
+
+  // Calculate adherence compliance score
+  const adherenceScore = useMemo(() => {
+    if (remindersList.length === 0) return 100;
+    const logsForCurrentReminders = adherenceLogs.filter(log => remindersList.some(rem => rem.id === log.reminderId));
+    if (logsForCurrentReminders.length === 0) return 100;
+    const takenCount = logsForCurrentReminders.filter(l => l.status === "Taken").length;
+    return Math.round((takenCount / logsForCurrentReminders.length) * 100);
+  }, [remindersList, adherenceLogs]);
+
+  // Suggestions parsed from core patient health profile data field
+  const suggestedMedications = useMemo(() => {
+    if (!profile?.currentMedications) return [];
+    return profile.currentMedications
+      .split(/[,;\n]+/)
+      .map(part => part.trim())
+      .filter(part => {
+        const lower = part.toLowerCase();
+        return part.length > 2 && 
+               !lower.includes("no active") && 
+               !lower.includes("none") && 
+               !lower.includes("n/a") &&
+               !lower.includes("no prescriptions") &&
+               !lower.includes("not set");
+      });
+  }, [profile?.currentMedications]);
+
+  // Periodic alarm dispatcher checks (every 10 seconds for user browser action sync)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      const currentHours = String(now.getHours()).padStart(2, "0");
+      const currentMinutes = String(now.getMinutes()).padStart(2, "0");
+      const timeStr = `${currentHours}:${currentMinutes}`;
+
+      // Check if any active enabled reminder matches the current minutes
+      const activeReminder = remindersList.find(r => r.enabled && r.time === timeStr);
+      if (activeReminder) {
+        // Prevent repeating alert triggers within the exact same minute
+        const alreadyLoggedInThisMinute = adherenceLogs.some(log => {
+          const logDate = new Date(log.loggedTime);
+          return log.reminderId === activeReminder.id &&
+                 logDate.getHours() === now.getHours() &&
+                 logDate.getMinutes() === now.getMinutes();
+        });
+
+        if (!alreadyLoggedInThisMinute && (!activeAlertNotification || activeAlertNotification.reminder.id !== activeReminder.id)) {
+          setActiveAlertNotification({
+            id: String(Date.now()),
+            reminder: activeReminder,
+            show: true
+          });
+          playReminderSound();
+          speakReminder(`Medication Reminders: Time to take your medication: ${activeReminder.dosage} of ${activeReminder.medicationName}. Remember, food rule: ${activeReminder.foodInstruction}. Please confirm.`);
+        }
+      }
+    }, 10000); 
+
+    return () => clearInterval(interval);
+  }, [remindersList, adherenceLogs, activeAlertNotification]);
+
+  // Helper actions
+  const handleAddNewReminder = (customName?: string) => {
+    const medName = customName || newReminderForm.medicationName.trim();
+    if (!medName) {
+      showReminderToast("Please enter a valid medication name.", "error");
+      return;
+    }
+
+    const payload: MedReminder = {
+      id: "rem_" + Math.random().toString(36).substring(2, 9),
+      medicationName: medName,
+      dosage: newReminderForm.dosage,
+      time: newReminderForm.time,
+      frequency: newReminderForm.frequency,
+      foodInstruction: newReminderForm.foodInstruction,
+      enabled: true,
+      notes: newReminderForm.notes.trim() || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    setRemindersList(prev => [...prev, payload]);
+    setIsAddReminderOpen(false);
+    // Reset form
+    setNewReminderForm({
+      medicationName: "",
+      dosage: "1 Tablet",
+      time: "08:00",
+      frequency: "Once daily" as const,
+      foodInstruction: "With food" as const,
+      notes: ""
+    });
+    showReminderToast(`Daily medication ${medName} reminder scheduled!`);
+  };
+
+  const handleToggleReminderEnabled = (id: string) => {
+    setRemindersList(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r));
+    showReminderToast("Reminder setting toggled.");
+  };
+
+  const handleDeleteReminder = (id: string) => {
+    setRemindersList(prev => prev.filter(r => r.id !== id));
+    showReminderToast("Scheduled reminder deleted.");
+  };
+
+  const handleLogAdherence = (reminderId: string, status: "Taken" | "Skipped") => {
+    const reminder = remindersList.find(r => r.id === reminderId);
+    if (!reminder) return;
+
+    const newLog: AdherenceLog = {
+      id: "log_" + Math.random().toString(36).substring(2, 9),
+      reminderId,
+      medicationName: reminder.medicationName,
+      dosage: reminder.dosage,
+      loggedTime: new Date().toISOString(),
+      status
+    };
+
+    setAdherenceLogs(prev => [newLog, ...prev]);
+    // update reminder record with last log time
+    setRemindersList(prev => prev.map(r => r.id === reminderId ? { ...r, lastAdherenceLogTime: newLog.loggedTime } : r));
+    
+    if (activeAlertNotification && activeAlertNotification.reminder.id === reminderId) {
+      setActiveAlertNotification(null);
+    }
+    
+    showReminderToast(status === "Taken" ? "Perfect adherence! Medication logged successfully." : "Scheduled dose skipped.");
+  };
+
+  const handleSimulateAlert = (reminder: MedReminder) => {
+    setActiveAlertNotification({
+      id: String(Date.now()),
+      reminder,
+      show: true
+    });
+    playReminderSound();
+    speakReminder(`Simulated Daily Reminder: Time to take ${reminder.dosage} of ${reminder.medicationName}. Instructed rule: ${reminder.foodInstruction}. Please log.`);
+    showReminderToast("Simulating live alarm trigger with Web voice synthesizer!");
+  };
+  // --- End of Medication Reminders State ---
+
   // Compute combined alerts (dynamic live events + local clinical safety computed alerts)
+
   const notifications = (() => {
     const list: NotificationItem[] = [];
 
@@ -538,443 +800,1043 @@ export default function Dashboard({
           </button>
         </div>
       </div>
-
-      {/* Grid Layout: Main Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Hand: Profile, Records, Prescription Uploads */}
-        <div className="lg:col-span-4 space-y-8">
-          
-          {/* 1. Account Profile Overview Card */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm text-left space-y-4 relative overflow-hidden">
-            <span className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
-            <h3 className="font-display font-black text-slate-900 text-sm flex items-center gap-2 pb-3 border-b border-slate-100 uppercase tracking-tight">
-              <User className="w-4 h-4 text-blue-600" />
-              <span>Patient Profile Overview</span>
-            </h3>
-
-            <div className="space-y-3 text-xs leading-normal font-medium">
-              <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                <span className="text-slate-500">Full Name</span>
-                <span className="text-slate-850 font-bold">{profile?.name || "Not Set"}</span>
-              </div>
-              <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                <span className="text-slate-500">Membership ID</span>
-                <span className="text-slate-850 font-mono font-extrabold">{membershipId}</span>
-              </div>
-              <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                <span className="text-slate-500">Account Status</span>
-                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                  isProfileComplete 
-                    ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
-                    : "bg-red-50 text-red-700 border border-red-100 animate-pulse"
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${isProfileComplete ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                  {accountStatus}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1.5 border-b border-slate-50">
-                <span className="text-slate-500">Pharmacy Status</span>
-                <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                  profile?.isConfirmed 
-                    ? "bg-blue-50 text-blue-700 border border-blue-105" 
-                    : "bg-amber-50 text-amber-700 border border-amber-100 animate-pulse"
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${profile?.isConfirmed ? 'bg-blue-500' : 'bg-amber-500'}`} />
-                  {pharmacyStatus}
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1.5">
-                <span className="text-slate-500">Verification Status</span>
-                <span className="text-slate-850 font-semibold text-right">{verificationStatus}</span>
-              </div>
+       {/* Interactive Quick Access Control Center */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="dashboard-toggle-controls">
+        {/* Profile Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setIsProfileDetailsOpen(true)}
+          className="flex items-center justify-between p-5 bg-white border border-slate-200 rounded-3xl hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group text-left shadow-xs"
+        >
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl shrink-0 border border-blue-105">
+              👤
+            </div>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-900 text-sm tracking-tight leading-tight">Patient Profile & Clinical Records</h3>
+              <p className="text-[11px] text-slate-500 mt-1 leading-normal truncate">Allergies, chronic conditions, and medical document locker</p>
             </div>
           </div>
+          <div className="px-3 py-1.5 shrink-0 bg-slate-50 group-hover:bg-blue-50 text-[10.5px] font-mono font-black rounded-xl text-slate-500 group-hover:text-blue-700 border border-slate-100 transition whitespace-nowrap">
+            Manage Profile →
+          </div>
+        </button>
 
-          {/* 2. Medical Records Card */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm text-left space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <h3 className="font-display font-black text-slate-900 text-sm flex items-center gap-2 uppercase tracking-tight">
-                <Activity className="w-4 h-4 text-violet-600" />
-                <span>Diagnostic & Care Chart</span>
-              </h3>
-              <button 
-                onClick={() => setEditMedicalFields(!editMedicalFields)}
-                className="text-[10px] font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100/50 px-2 py-1 rounded-lg"
-              >
-                {editMedicalFields ? "Close" : "Update Records"}
-              </button>
+        {/* Notifications Toggle Button */}
+        <button
+          type="button"
+          onClick={() => setIsNotificationsListOpen(true)}
+          className="flex items-center justify-between p-5 bg-white border border-slate-200 rounded-3xl hover:border-amber-400 hover:shadow-md transition-all cursor-pointer group text-left shadow-xs"
+        >
+          <div className="flex items-center gap-4 min-w-0">
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-2xl shrink-0 relative border border-amber-105">
+              🔔
+              {notifications.some(n => !n.read) && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 border-2 border-white rounded-full animate-ping" />
+              )}
             </div>
+            <div className="min-w-0">
+              <h3 className="font-bold text-slate-900 text-sm tracking-tight leading-tight">Clinical Notification Center</h3>
+              <p className="text-[11px] text-slate-505 mt-1 leading-normal truncate">
+                {notifications.some(n => !n.read) 
+                  ? `${notifications.filter(n => !n.read).length} urgent care alerts requiring attention` 
+                  : "No outstanding patient messages"}
+              </p>
+            </div>
+          </div>
+          <div className="px-3 py-1.5 shrink-0 bg-slate-50 group-hover:bg-amber-50 text-[10.5px] font-mono font-black rounded-xl text-slate-500 group-hover:text-amber-800 border border-slate-100 transition whitespace-nowrap">
+            View Alerts ({notifications.length}) →
+          </div>
+        </button>
+      </div>
 
-            {/* Editing state */}
-            {editMedicalFields ? (
-              <form onSubmit={handleMedicalFormSubmit} className="space-y-4">
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-[9px] font-mono font-bold uppercase text-slate-400 mb-1">
-                      Allergies (severe adverse states)
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.allergies}
-                      onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
-                      placeholder="e.g. Sulfa, NSAIDs, Penicillin"
-                      className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-900"
-                    />
-                  </div>
+      {/* Grid Layout: Main Columns Cascading Downward */}
+      <div className="space-y-8 max-w-5xl mx-auto">
 
-                  <div>
-                    <label className="block text-[9px] font-mono font-bold uppercase text-slate-400 mb-1">
-                      Chronic Health Conditions
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.chronicConditions}
-                      onChange={(e) => setFormData({ ...formData, chronicConditions: e.target.value })}
-                      placeholder="e.g. Hypertension, Diabetes"
-                      className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-900"
-                    />
+        {/* PROFILE AND RECORDS MODAL OVERLAY */}
+        <AnimatePresence>
+          {isProfileDetailsOpen && (
+            <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-slate-50 rounded-3xl border border-slate-150 shadow-2xl max-w-4xl w-full pointer-events-auto relative max-h-[90vh] overflow-y-auto"
+              >
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-20 rounded-t-3xl">
+                  <div className="flex items-center gap-2.5 text-left">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-lg">
+                      👤
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight">
+                        Patient Profile & Health Records
+                      </h3>
+                      <p className="text-[10px] text-slate-450 font-semibold leading-none mt-0.5">
+                        View and manage clinical demographics, care lists, and diagnostic PDFs
+                      </p>
+                    </div>
                   </div>
-
-                  <div>
-                    <label className="block text-[9px] font-mono font-bold uppercase text-slate-400 mb-1">
-                      Current Daily Medications
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.currentMedications}
-                      onChange={(e) => setFormData({ ...formData, currentMedications: e.target.value })}
-                      placeholder="e.g. Lisinopril 10mg once daily"
-                      className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[9px] font-mono font-bold uppercase text-slate-400 mb-1">
-                      Primary Medical History Details
-                    </label>
-                    <textarea
-                      value={formData.medicalHistory}
-                      onChange={(e) => setFormData({ ...formData, medicalHistory: e.target.value })}
-                      placeholder="Enter previous surgeries or past treatment summaries"
-                      rows={2}
-                      className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-900 resize-none"
-                    />
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsProfileDetailsOpen(false)}
+                    className="p-1.5 hover:bg-slate-100 rounded-full text-slate-420 cursor-pointer transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl"
-                >
-                  Save to Clinical File
-                </button>
-              </form>
-            ) : (
-              // Display state
-              <div className="space-y-4">
-                <div className="space-y-3 text-xs leading-normal block">
-                  <div>
-                    <span className="block text-[10px] uppercase font-mono font-bold text-slate-450 tracking-wider">Medical History Summary</span>
-                    <p className="text-slate-700 font-medium mt-0.5">{profile?.medicalHistory || "None Registered"}</p>
-                  </div>
+                {/* Modal Content */}
+                <div className="p-6 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    {/* 1. Account Profile Overview Card inside Modal */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left space-y-4 relative overflow-hidden">
+                      <span className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
+                      <h4 className="font-display font-black text-slate-900 text-xs flex items-center gap-2 pb-2 border-b border-slate-100 uppercase tracking-tight">
+                        <User className="w-3.5 h-3.5 text-blue-601" />
+                        <span>Account Overview</span>
+                      </h4>
 
-                  <div>
-                    <span className="block text-[10px] uppercase font-mono font-bold text-red-500 tracking-wider">Allergies & Sensitivities</span>
-                    <span className={`inline-block mt-1 px-2.5 py-0.5 rounded-lg text-[10px] font-extrabold border ${
-                      profile?.allergies && profile.allergies.toLowerCase() !== "none"
-                        ? "bg-red-50 text-red-700 border-red-150 animate-pulse"
-                        : "bg-emerald-50 text-emerald-700 border-emerald-100"
-                    }`}>
-                      {profile?.allergies || "No Known Allergies"}
-                    </span>
-                  </div>
+                      <div className="space-y-2.5 text-xs font-medium">
+                        <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                          <span className="text-slate-505 text-[11px]">Full Name</span>
+                          <span className="text-slate-850 font-bold">{profile?.name || "Not Set"}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                          <span className="text-slate-550 text-[11px]">Membership ID</span>
+                          <span className="text-slate-850 font-mono font-extrabold">{membershipId}</span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                          <span className="text-slate-550 text-[11px]">Account Status</span>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            isProfileComplete 
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                              : "bg-red-50 text-red-700 border border-red-100 animate-pulse"
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isProfileComplete ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                            {accountStatus}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center py-1 border-b border-slate-50">
+                          <span className="text-slate-550 text-[11px]">Pharmacy Status</span>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            profile?.isConfirmed 
+                              ? "bg-blue-50 text-blue-700 border border-blue-105" 
+                              : "bg-amber-50 text-amber-700 border border-amber-100 animate-pulse"
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${profile?.isConfirmed ? 'bg-blue-500' : 'bg-amber-500'}`} />
+                            {pharmacyStatus}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center py-1">
+                          <span className="text-slate-550 text-[11px]">Verification Status</span>
+                          <span className="text-slate-850 font-semibold text-right">{verificationStatus}</span>
+                        </div>
+                      </div>
 
-                  <div>
-                    <span className="block text-[10px] uppercase font-mono font-bold text-blue-500 tracking-wider">Chronic/Ongoing Conditions</span>
-                    <p className="text-slate-700 font-bold mt-0.5">{profile?.chronicConditions || "None Registered"}</p>
-                  </div>
-
-                  <div>
-                    <span className="block text-[10px] uppercase font-mono font-bold text-indigo-500 tracking-wider">Active Prescriptions Chart</span>
-                    <p className="text-slate-700 font-bold mt-0.5">{profile?.currentMedications || "No active prescriptions"}</p>
-                  </div>
-                </div>
-
-                {/* Patient Document List Section (Displayed inside account records) */}
-                <div className="pt-3 border-t border-slate-100 space-y-2">
-                  <span className="block text-[10px] uppercase font-mono font-bold text-slate-450 tracking-wider flex items-center gap-1.5">
-                    <FileText className="w-3.5 h-3.5 text-slate-405" />
-                    <span>Uploaded Medical Documents</span>
-                  </span>
-
-                  {profile?.uploadedDocuments && profile.uploadedDocuments.length > 0 ? (
-                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {profile.uploadedDocuments.map((docObj) => (
-                        <div 
-                          key={docObj.id} 
-                          className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-150 rounded-xl hover:bg-slate-100 transition duration-150"
+                      {/* Quick Demographics Edit Option */}
+                      <div className="pt-3 border-t border-slate-100 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsProfileDetailsOpen(false);
+                            onOpenProfile();
+                          }}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"
                         >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className="text-lg shrink-0">
-                              {docObj.type === "Prescription" ? "📝" : docObj.type === "Report" ? "📊" : "🔬"}
+                          <span>Edit Contact Profile</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 2. Medical Records Card inside Modal */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <h4 className="font-display font-black text-slate-900 text-xs flex items-center gap-2 uppercase tracking-tight">
+                          <Activity className="w-3.5 h-3.5 text-violet-601" />
+                          <span>Diagnostic & Care Chart</span>
+                        </h4>
+                        <button 
+                          onClick={() => setEditMedicalFields(!editMedicalFields)}
+                          className="text-[10px] font-bold text-blue-600 hover:text-blue-750 bg-blue-50 hover:bg-blue-100/50 px-2 py-1 rounded-lg transition cursor-pointer"
+                        >
+                          {editMedicalFields ? "Close" : "Update Records"}
+                        </button>
+                      </div>
+
+                      {/* Editing state */}
+                      {editMedicalFields ? (
+                        <form onSubmit={handleMedicalFormSubmit} className="space-y-3">
+                          <div className="space-y-2.5">
+                            <div>
+                              <label className="block text-[8.5px] font-mono font-bold uppercase text-slate-450 mb-0.5">
+                                Allergies (severe adverse states)
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.allergies}
+                                onChange={(e) => setFormData({ ...formData, allergies: e.target.value })}
+                                placeholder="e.g. Sulfa, NSAIDs, Penicillin"
+                                className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-905"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[8.5px] font-mono font-bold uppercase text-slate-455 mb-0.5">
+                                Chronic Health Conditions
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.chronicConditions}
+                                onChange={(e) => setFormData({ ...formData, chronicConditions: e.target.value })}
+                                placeholder="e.g. Hypertension, Diabetes"
+                                className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-905"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[8.5px] font-mono font-bold uppercase text-slate-455 mb-0.5">
+                                Current Daily Medications
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.currentMedications}
+                                onChange={(e) => setFormData({ ...formData, currentMedications: e.target.value })}
+                                placeholder="e.g. Lisinopril 10mg once daily"
+                                className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-905"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block text-[8.5px] font-mono font-bold uppercase text-slate-455 mb-0.5">
+                                Primary Medical History Details
+                              </label>
+                              <textarea
+                                value={formData.medicalHistory}
+                                onChange={(e) => setFormData({ ...formData, medicalHistory: e.target.value })}
+                                placeholder="Enter previous surgeries or past treatment summaries"
+                                rows={2}
+                                className="w-full bg-slate-50 border border-slate-200 p-2 rounded-xl text-xs text-slate-905 resize-none"
+                              />
+                            </div>
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl cursor-pointer"
+                          >
+                            Save to Clinical File
+                          </button>
+                        </form>
+                      ) : (
+                        // Display state
+                        <div className="space-y-3 text-xs leading-normal block">
+                          <div>
+                            <span className="block text-[9px] uppercase font-mono font-bold text-slate-450 tracking-wider">Medical History Summary</span>
+                            <p className="text-slate-705 font-medium mt-0.5">{profile?.medicalHistory || "None Registered"}</p>
+                          </div>
+
+                          <div>
+                            <span className="block text-[9px] uppercase font-mono font-bold text-red-500 tracking-wider">Allergies & Sensitivities</span>
+                            <span className={`inline-block mt-1 px-2 py-0.5 rounded-lg text-[9px] font-extrabold border ${
+                              profile?.allergies && profile.allergies.toLowerCase() !== "none"
+                                ? "bg-red-50 text-red-700 border-red-150 animate-pulse"
+                                : "bg-emerald-50 text-emerald-700 border-emerald-100"
+                            }`}>
+                              {profile?.allergies || "No Known Allergies"}
                             </span>
-                            <div className="min-w-0 text-left">
-                              <a 
-                                href={docObj.url} 
-                                target="_blank" 
-                                rel="noreferrer" 
-                                className="block text-xs font-bold text-blue-600 hover:underline truncate"
+                          </div>
+
+                          <div>
+                            <span className="block text-[9px] uppercase font-mono font-bold text-blue-500 tracking-wider">Chronic/Ongoing Conditions</span>
+                            <p className="text-slate-705 font-bold mt-0.5">{profile?.chronicConditions || "None Registered"}</p>
+                          </div>
+
+                          <div>
+                            <span className="block text-[9px] uppercase font-mono font-bold text-indigo-500 tracking-wider">Active Prescriptions Chart</span>
+                            <p className="text-slate-750 font-bold mt-0.5">{profile?.currentMedications || "No active prescriptions"}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2 border-t border-slate-200/60 animate-fade-in">
+                    
+                    {/* Upload documents list */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left space-y-4">
+                      <span className="block text-[10px] uppercase font-mono font-bold text-slate-450 tracking-wider flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5 text-slate-405" />
+                        <span>Uploaded Medical Documents</span>
+                      </span>
+
+                      {profile?.uploadedDocuments && profile.uploadedDocuments.length > 0 ? (
+                        <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                          {profile.uploadedDocuments.map((docObj) => (
+                            <div 
+                              key={docObj.id} 
+                              className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-150 rounded-xl hover:bg-slate-100 transition duration-150 text-left"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-base shrink-0">
+                                  {docObj.type === "Prescription" ? "📝" : docObj.type === "Report" ? "📊" : "🔬"}
+                                </span>
+                                <div className="min-w-0 text-left">
+                                  <a 
+                                    href={docObj.url} 
+                                    target="_blank" 
+                                    rel="noreferrer" 
+                                    className="block text-xs font-bold text-blue-600 hover:underline truncate"
+                                  >
+                                    {docObj.name}
+                                  </a>
+                                  <span className="block text-[9px] text-slate-400 font-mono">
+                                    {docObj.type} • {docObj.uploadedAt} {docObj.size && `• ${docObj.size}`}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <button 
+                                onClick={() => handleRemoveDocument(docObj)}
+                                className="text-slate-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 shrink-0 cursor-pointer"
+                                title="Delete file"
                               >
-                                {docObj.name}
-                              </a>
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-505 leading-normal font-semibold text-center italic py-4">
+                          No external laboratory reports or clinical files have been cataloged yet.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Prescription & Lab Upload Form Component */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm text-left space-y-4">
+                      <h4 className="font-display font-black text-slate-900 text-xs flex items-center gap-2 uppercase tracking-tight">
+                        <Upload className="w-3.5 h-3.5 text-emerald-601" />
+                        <span>Upload New Documents</span>
+                      </h4>
+                      
+                      <p className="text-[10.5px] text-slate-550 leading-normal font-medium">
+                        Upload physical prescriptions, laboratory sheets, or diagnostic PDFs.
+                      </p>
+
+                      {/* Selection tab of doc type */}
+                      <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl text-center">
+                        {(["Prescription", "Report", "Laboratory"] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setSelectedDocType(t)}
+                            className={`py-1 text-[9.5px] font-bold rounded-lg transition-all cursor-pointer ${
+                              selectedDocType === t 
+                                ? "bg-white text-slate-900 shadow-sm" 
+                                : "text-slate-500 hover:text-slate-800"
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+
+                      {pendingFile ? (
+                        <div className="border-2 border-blue-500 bg-blue-50/20 rounded-2xl p-4 flex flex-col items-center justify-center text-center space-y-3 min-h-[120px] relative">
+                          {uploadLoading ? (
+                            <div className="space-y-2 py-2">
+                              <div className="w-5 h-5 border-2 border-blue-601 border-t-transparent rounded-full animate-spin mx-auto" />
+                              <p className="text-[10px] text-slate-500 font-bold font-mono">Syncing with cloud...</p>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center mx-auto shadow-xs">
+                                <FileText className="w-5 h-5" />
+                              </div>
+                              <div className="space-y-0.5">
+                                <p className="text-xs font-bold text-slate-850 break-all max-w-[200px]">
+                                  {pendingFile.name}
+                                </p>
+                                <p className="text-[9px] text-slate-400 font-mono">
+                                  {(pendingFile.size / 1024).toFixed(1)} KB • <span className="uppercase font-bold text-blue-600">{selectedDocType}</span>
+                                </p>
+                              </div>
+
+                              <div className="flex gap-2 w-full pt-1 max-w-[200px]">
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingFile(null)}
+                                  className="flex-1 px-2.5 py-1.5 border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 text-[10.5px] font-bold rounded-lg transition cursor-pointer"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendFile()}
+                                  className="flex-1 px-2.5 py-1.5 bg-blue-650 hover:bg-blue-700 text-white text-[10.5px] font-bold rounded-lg transition shadow-xs flex items-center justify-center gap-1 cursor-pointer"
+                                >
+                                  <Send className="w-3 h-3" />
+                                  <span>Send</span>
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <div 
+                          onDragEnter={handleDrag}
+                          onDragOver={handleDrag}
+                          onDragLeave={handleDrag}
+                          onDrop={handleDrop}
+                          className={`border-2 border-dashed rounded-2xl p-4 transition flex flex-col items-center justify-center text-center cursor-pointer min-h-[120px] relative ${
+                            dragActive 
+                              ? "border-blue-500 bg-blue-50/50" 
+                              : "border-slate-200 hover:border-slate-355 bg-slate-50/30 hover:bg-slate-55/70"
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            id="clinical-file-picker"
+                            onChange={handleFileSelect}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                            accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                          />
+                          {uploadLoading ? (
+                            <div className="space-y-1">
+                              <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                              <p className="text-[10px] text-slate-500 font-bold font-mono">Auditing documents...</p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-550 mx-auto">
+                                <Upload className="w-4 h-4" />
+                              </div>
+                              <p className="text-[11px] font-bold text-slate-700">
+                                <span>Drag files here, or </span>
+                                <span className="text-blue-600 hover:underline">browse</span>
+                              </p>
+                              <p className="text-[8.5px] text-slate-400 font-mono">
+                                PDF, JPG, PNG up to 10MB
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <AnimatePresence mode="wait">
+                        {uploadError && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-2 border border-red-100 bg-red-50 text-[9.5px] text-red-700 rounded-lg flex items-start gap-1 leading-normal font-semibold"
+                          >
+                            <AlertCircle className="w-3.5 h-3.5 text-red-555 shrink-0" />
+                            <span>{uploadError}</span>
+                          </motion.div>
+                        )}
+                        {uploadSuccess && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-2 border border-emerald-100 bg-emerald-50 text-[9.5px] text-emerald-800 rounded-lg flex items-start gap-1 leading-normal font-semibold"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-655 shrink-0" />
+                            <span>{uploadSuccess}</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 bg-white border-t border-slate-100 p-4 flex justify-end gap-2.5 rounded-b-3xl">
+                  <button
+                    type="button"
+                    onClick={() => setIsProfileDetailsOpen(false)}
+                    className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs cursor-pointer shadow-sm transition"
+                  >
+                    Close Window
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* CLINICAL NOTIFICATION SYSTEM MODAL OVERLAY */}
+        <AnimatePresence>
+          {isNotificationsListOpen && (
+            <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl border border-slate-150 shadow-2xl max-w-2xl w-full pointer-events-auto relative max-h-[85vh] overflow-y-auto"
+              >
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-slate-100 px-6 py-4 flex items-center justify-between z-20 rounded-t-3xl text-left">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center text-lg shrink-0 relative">
+                      🔔
+                      {notifications.some(n => !n.read) && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-red-500 border border-white rounded-full animate-ping" />
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight flex items-center gap-2">
+                        <span>Patient Notification Center</span>
+                        {notifications.some(n => !n.read) && (
+                          <span className="px-1.5 py-0.5 bg-red-500 text-white font-mono font-bold text-[8px] tracking-wider rounded-md uppercase shrink-0">
+                            Alerts Live
+                          </span>
+                        )}
+                      </h3>
+                      <p className="text-[10px] text-slate-450 font-semibold leading-none mt-0.5">
+                        Interactive feed for safety updates, order logs, and clinical messages.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsNotificationsListOpen(false)}
+                    className="p-1.5 hover:bg-slate-100 rounded-full text-slate-420 cursor-pointer transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div className="p-6">
+                  {notifications.length > 0 ? (
+                    <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                      {notifications.map((notif) => (
+                        <div 
+                          key={notif.id}
+                          className={`p-4 border rounded-2xl flex items-start gap-3 justify-between transition text-left ${
+                            notif.read 
+                              ? "bg-slate-50 border-slate-100 opacity-65 hover:opacity-100" 
+                              : "bg-amber-50/20 border-amber-100 shadow-sm"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            <div className={`p-2 rounded-xl shrink-0 text-base ${
+                              notif.type === "adminMessage" ? "bg-blue-50 text-blue-600" :
+                              notif.type === "orderUpdate" ? "bg-violet-50 text-violet-600" :
+                              notif.type === "prescriptionApproval" ? "bg-emerald-50 text-emerald-600" :
+                              "bg-red-50 text-red-600"
+                            }`}>
+                              {notif.type === "adminMessage" ? "💬" :
+                               notif.type === "orderUpdate" ? "📦" :
+                               notif.type === "prescriptionApproval" ? "✅" :
+                               "💊"}
+                            </div>
+
+                            <div className="space-y-0.5 text-left min-w-0">
+                              <h4 className="font-bold text-xs text-slate-900 leading-tight truncate">
+                                {notif.title}
+                              </h4>
+                              <p className="text-xs text-slate-600 leading-relaxed font-semibold">
+                                {notif.message}
+                              </p>
                               <span className="block text-[9px] text-slate-400 font-mono">
-                                {docObj.type} • {docObj.uploadedAt} {docObj.size && `• ${docObj.size}`}
+                                {notif.timestamp}
                               </span>
                             </div>
                           </div>
 
-                          <button 
-                            onClick={() => handleRemoveDocument(docObj)}
-                            className="text-slate-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50 shrink-0 cursor-pointer"
-                            title="Delete file"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                            <button
+                              onClick={() => handleToggleRead(notif.id)}
+                              className={`text-[9.5px] font-bold px-2 py-1 rounded-lg transition shrink-0 cursor-pointer ${
+                                notif.read ? "bg-slate-100 text-slate-500 hover:bg-slate-200" : "bg-white border border-amber-250 text-amber-800 font-black shadow-xs cursor-pointer hover:bg-amber-50"
+                              }`}
+                              title={notif.read ? "Mark as unread" : "Mark as read"}
+                            >
+                              {notif.read ? "Unread" : "Mark Read"}
+                            </button>
+                            <button
+                              onClick={() => handleDismissNotification(notif.id)}
+                              className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-red-500 transition cursor-pointer shrink-0"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
                   ) : (
-                    <p className="text-[11px] text-slate-500 leading-normal font-semibold text-center italic py-2">
-                      No external laboratory reports or clinical files have been cataloged yet.
-                    </p>
+                    <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
+                      <p className="text-xs text-slate-505 leading-normal italic font-semibold">
+                        All alerts processed. Your medication tracker is perfectly clear.
+                      </p>
+                    </div>
                   )}
+                </div>
+
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 bg-white border-t border-slate-100 p-4 flex justify-end gap-2.5 rounded-b-3xl">
+                  <button
+                    type="button"
+                    onClick={() => setIsNotificationsListOpen(false)}
+                    className="px-5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-black text-xs cursor-pointer shadow-sm transition"
+                  >
+                    Close Window
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* Daily Medication Scheduling & Alert Center (EHR Integrated) */}
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 text-left relative overflow-hidden" id="medication-scheduler-panel">
+            <span className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+            
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-150/65 pb-4">
+              <div>
+                <h3 className="font-display font-black text-slate-900 text-sm flex items-center gap-2 uppercase tracking-tight">
+                  <BellRing className="w-4.5 h-4.5 text-indigo-600 animate-pulse" />
+                  <span>Daily Medication Reminders & Compliance Tracker</span>
+                </h3>
+                <p className="text-[10px] text-slate-450 font-semibold leading-tight mt-0.5">
+                  Schedule automatic alerts based on your active clinical profile data. Track cumulative daily compliance.
+                </p>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className={`px-2 py-1 rounded-xl text-[10px] font-mono font-bold border ${
+                  adherenceScore >= 80 
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-150" 
+                    : "bg-amber-50 text-amber-700 border-amber-150"
+                }`}>
+                  Streak Score: {adherenceScore}% Compliance
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsAddReminderOpen(true)}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10.5px] rounded-xl flex items-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer active:scale-95 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Alert</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Reminder Actions Toast Feedback */}
+            {reminderToast && (
+              <div className={`p-2.5 text-xs rounded-xl border flex items-center gap-1.5 transition-all font-semibold ${
+                reminderToast.type === "success" 
+                  ? "bg-emerald-50 text-emerald-800 border-emerald-150" 
+                  : "bg-red-50 text-red-800 border-red-150"
+              }`}>
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{reminderToast.message}</span>
+              </div>
+            )}
+
+            {/* Suggested medicines based on user health record profile data */}
+            {suggestedMedications.length > 0 && (
+              <div className="p-3.5 bg-blue-50/40 rounded-2xl border border-blue-150/40 space-y-2">
+                <span className="text-[10px] uppercase font-mono font-black text-slate-450 tracking-wider block">
+                  📋 Suggested Medications From Your EHR Medical Profile:
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {suggestedMedications.map((med, idx) => {
+                    const isAlreadyAdded = remindersList.some(r => r.medicationName.toLowerCase() === med.toLowerCase());
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        disabled={isAlreadyAdded}
+                        onClick={() => {
+                          setNewReminderForm(prev => ({ ...prev, medicationName: med }));
+                          setIsAddReminderOpen(true);
+                          showReminderToast(`Medication name '${med}' loaded! Configure dosage & alert times.`);
+                        }}
+                        className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg flex items-center gap-1 transition duration-150 shadow-sm shrink-0 active:scale-95 ${
+                          isAlreadyAdded
+                            ? "bg-slate-50 text-slate-400 border border-slate-200 cursor-not-allowed"
+                            : "bg-white hover:bg-blue-50 border border-blue-200/60 hover:border-blue-400 text-blue-800 cursor-pointer"
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5 text-blue-650" />
+                        <span>{med}</span>
+                        {isAlreadyAdded && <span className="text-[9px] font-normal font-mono opacity-80">(scheduled)</span>}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
-          </div>
 
-          {/* 3. Prescription Upload Card */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm text-left space-y-4">
-            <h3 className="font-display font-black text-slate-900 text-sm flex items-center gap-2 uppercase tracking-tight">
-              <Upload className="w-4 h-4 text-emerald-600" />
-              <span>Prescription & Lab Upload</span>
-            </h3>
-            
-            <p className="text-[11px] text-slate-500 leading-normal font-medium">
-              Upload physical doctor prescriptions, laboratory diagnostic sheets, or medical files. Your virtual nurse safety-checks documents against registered allergies.
-            </p>
-
-            {/* Selection tab of doc type */}
-            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-100 rounded-xl text-center">
-              {(["Prescription", "Report", "Laboratory"] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setSelectedDocType(t)}
-                  className={`py-1 text-[10px] font-bold rounded-lg transition-all ${
-                    selectedDocType === t 
-                      ? "bg-white text-slate-900 shadow-sm" 
-                      : "text-slate-500 hover:text-slate-800"
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-
-            {pendingFile ? (
-              <div className="border-2 border-blue-500 bg-blue-50/20 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-4 min-h-[140px] relative">
-                {uploadLoading ? (
-                  <div className="space-y-2 py-4">
-                    <div className="w-6 h-6 border-2 border-blue-601 border-t-transparent rounded-full animate-spin mx-auto" />
-                    <p className="text-xs text-slate-500 font-bold font-mono">Clinically Auditing & Syncing with cloud...</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-                      <FileText className="w-6 h-6" />
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-xs font-bold text-slate-800 break-all max-w-[220px]">
-                        {pendingFile.name}
-                      </p>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        {(pendingFile.size / 1024).toFixed(1)} KB • <span className="uppercase font-bold text-blue-600">{selectedDocType}</span>
-                      </p>
-                    </div>
-
-                    <div className="flex gap-2 w-full pt-1 max-w-[240px]">
-                      <button
-                        type="button"
-                        id="btn-clear-pending-file"
-                        onClick={() => setPendingFile(null)}
-                        className="flex-1 px-3 py-2 border border-slate-200 bg-white hover:bg-slate-100 text-slate-650 text-xs font-bold rounded-xl transition-all"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        id="btn-send-pending-file"
-                        onClick={() => handleSendFile()}
-                        className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-705 text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Send</span>
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div 
-                onDragEnter={handleDrag}
-                onDragOver={handleDrag}
-                onDragLeave={handleDrag}
-                onDrop={handleDrop}
-                className={`border-2 border-dashed rounded-2xl p-6 transition flex flex-col items-center justify-center text-center cursor-pointer min-h-[140px] relative ${
-                  dragActive 
-                    ? "border-blue-500 bg-blue-50/50" 
-                    : "border-slate-200 hover:border-slate-350 bg-slate-50/30 hover:bg-slate-50/70"
+            {/* TABS SELECTION */}
+            <div className="flex gap-2 border-b border-slate-100 pb-1.5">
+              <button
+                type="button"
+                onClick={() => setActiveRemindersTab("reminders")}
+                className={`pb-1 px-1 text-xs font-bold transition cursor-pointer border-b-2 ${
+                  activeRemindersTab === "reminders" 
+                    ? "text-indigo-650 border-indigo-600 font-extrabold" 
+                    : "text-slate-400 border-transparent hover:text-slate-650"
                 }`}
               >
-                <input
-                  type="file"
-                  id="clinical-file-picker"
-                  onChange={handleFileSelect}
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-                />
-                {uploadLoading ? (
-                  <div className="space-y-2">
-                    <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
-                    <p className="text-xs text-slate-500 font-bold font-mono">Clinically Auditing & Syncing with cloud...</p>
+                🔔 Active Reminders ({remindersList.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveRemindersTab("logs")}
+                className={`pb-1 px-1 text-xs font-bold transition cursor-pointer border-b-2 ${
+                  activeRemindersTab === "logs" 
+                    ? "text-indigo-650 border-indigo-600 font-extrabold" 
+                    : "text-slate-400 border-transparent hover:text-slate-650"
+                }`}
+              >
+                📊 Compliance Logs ({adherenceLogs.length})
+              </button>
+            </div>
+
+            {/* REMINDERS LIST TAB */}
+            {activeRemindersTab === "reminders" && (
+              <div className="space-y-3">
+                {remindersList.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
+                    <p className="text-xs text-slate-500 font-semibold leading-normal">
+                      No daily reminders or scheduled alerts configured.
+                    </p>
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      Add custom active alarms or import suggestions from your medical history above.
+                    </p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-500 mx-auto">
-                      <Upload className="w-5 h-5" />
-                    </div>
-                    <p className="text-xs font-bold text-slate-700 leading-normal">
-                      <span>Drag and drop here, or </span>
-                      <span className="text-blue-600 hover:underline">browse files</span>
-                    </p>
-                    <p className="text-[9px] text-slate-400 font-mono">
-                      PDF, JPG, PNG up to 10MB verified
-                    </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                    {remindersList.map((rem) => {
+                      return (
+                        <div 
+                          key={rem.id}
+                          className={`p-4 border rounded-2xl transition-all space-y-3 text-left flex flex-col justify-between ${
+                            rem.enabled 
+                              ? "bg-slate-50/50 border-slate-200 shadow-sm" 
+                              : "bg-slate-100/40 border-slate-150 opacity-60"
+                          }`}
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <span className="font-mono text-[9px] uppercase font-bold text-indigo-500 tracking-wide block">
+                                  DAILY REMINDER
+                                </span>
+                                <h4 className="font-bold text-xs text-slate-900 truncate leading-tight">
+                                  {rem.medicationName}
+                                </h4>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <label className="relative inline-flex items-center cursor-pointer select-none">
+                                  <input 
+                                    type="checkbox" 
+                                    className="sr-only peer" 
+                                    checked={rem.enabled}
+                                    onChange={() => handleToggleReminderEnabled(rem.id)}
+                                  />
+                                  <div className="w-7 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-indigo-650"></div>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteReminder(rem.id)}
+                                  className="p-1 text-slate-400 hover:text-red-500 transition cursor-pointer"
+                                  title="Delete reminder"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 text-[11px] font-medium text-slate-600 pt-0.5">
+                              <div>
+                                <span className="block text-[9px] font-mono text-slate-400 uppercase font-semibold">Dosage:</span>
+                                <span className="font-bold text-slate-750">{rem.dosage}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] font-mono text-slate-400 uppercase font-semibold">Alert Time:</span>
+                                <span className="font-black text-slate-900 font-mono inline-flex items-center gap-0.5">
+                                  ⏰ {rem.time}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] font-mono text-slate-400 uppercase font-semibold">Frequency:</span>
+                                <span className="font-semibold text-slate-700">{rem.frequency}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] font-mono text-slate-400 uppercase font-semibold">Regimen:</span>
+                                <span className="font-bold text-indigo-700">{rem.foodInstruction}</span>
+                              </div>
+                            </div>
+
+                            {rem.notes && (
+                              <p className="text-[10.5px] italic text-slate-500 bg-white p-2 border border-slate-100 rounded-lg">
+                                * {rem.notes}
+                              </p>
+                            )}
+
+                            {rem.lastAdherenceLogTime && (
+                              <div className="text-[10px] text-emerald-650 font-bold block pt-0.5">
+                                ✓ Last taken: {new Date(rem.lastAdherenceLogTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-150/50 flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleLogAdherence(rem.id, "Taken")}
+                              className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] rounded-lg transition active:scale-95 cursor-pointer"
+                            >
+                              Log Taken
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleLogAdherence(rem.id, "Skipped")}
+                              className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-500 font-semibold text-[10px] rounded-lg transition cursor-pointer"
+                            >
+                              Skip
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSimulateAlert(rem)}
+                              className="px-2 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 font-black text-[10px] rounded-lg transition active:scale-95 cursor-pointer"
+                              title="Instantly test voice synthesis alarm & buzzer"
+                            >
+                              🔊 Test
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
             )}
 
-            <AnimatePresence mode="wait">
-              {uploadError && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="p-2 border border-red-100 bg-red-50 text-[10px] text-red-700 rounded-xl flex items-start gap-1.5 leading-normal font-semibold"
-                >
-                  <AlertCircle className="w-3.5 h-3.5 text-red-555 shrink-0" />
-                  <span>{uploadError}</span>
-                </motion.div>
-              )}
-              {uploadSuccess && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="p-2 border border-emerald-100 bg-emerald-50 text-[10px] text-emerald-800 rounded-xl flex items-start gap-1.5 leading-normal font-semibold"
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-655 shrink-0" />
-                  <span>{uploadSuccess}</span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-        </div>
-
-        {/* Right Hand: Order tracking, Medication Center, Notifications */}
-        <div className="lg:col-span-8 space-y-8 text-left">
-          
-          {/* 4. Notification & Alert Center */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-            <h3 className="font-display font-black text-slate-900 text-sm flex items-center justify-between uppercase tracking-tight">
-              <span className="flex items-center gap-2">
-                <Bell className="w-4 h-4 text-amber-500" />
-                <span>Patient Notification Center</span>
-              </span>
-              {notifications.some(n => !n.read) && (
-                <span className="px-2 py-0.5 bg-red-500 text-white font-mono font-bold text-[9px] tracking-wider rounded-full uppercase animate-bounce">
-                  Live Alerts
-                </span>
-              )}
-            </h3>
-
-            {notifications.length > 0 ? (
+            {/* COMPLIANCE LOGS TAB */}
+            {activeRemindersTab === "logs" && (
               <div className="space-y-3">
-                {notifications.map((notif) => (
-                  <div 
-                    key={notif.id}
-                    className={`p-4 border rounded-2xl flex items-start gap-3 justify-between transition ${
-                      notif.read 
-                        ? "bg-slate-50 border-slate-100 opacity-65" 
-                        : "bg-amber-50/20 border-amber-100 shadow-sm"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className={`p-2 rounded-xl shrink-0 text-lg ${
-                        notif.type === "adminMessage" ? "bg-blue-50 text-blue-600" :
-                        notif.type === "orderUpdate" ? "bg-violet-50 text-violet-600" :
-                        notif.type === "prescriptionApproval" ? "bg-emerald-50 text-emerald-600" :
-                        "bg-red-50 text-red-600"
-                      }`}>
-                        {notif.type === "adminMessage" ? "💬" :
-                         notif.type === "orderUpdate" ? "📦" :
-                         notif.type === "prescriptionApproval" ? "✅" :
-                         "💊"}
-                      </div>
-
-                      <div className="space-y-1 text-left">
-                        <h4 className="font-bold text-xs text-slate-900 leading-tight">
-                          {notif.title}
-                        </h4>
-                        <p className="text-xs text-slate-600 leading-relaxed">
-                          {notif.message}
-                        </p>
-                        <span className="block text-[9px] text-slate-400 font-mono">
-                          {notif.timestamp}
+                {adherenceLogs.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
+                    <p className="text-xs text-slate-500 font-semibold italic">
+                      No medication compliance history recorded yet. Log taken doses to increment your score.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+                    {adherenceLogs.map((log) => (
+                      <div 
+                        key={log.id}
+                        className="p-3 border border-slate-150 rounded-xl bg-slate-50/75 hover:bg-slate-50 transition duration-150 flex items-center justify-between gap-3 text-left"
+                      >
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs text-slate-900">
+                              {log.medicationName} ({log.dosage})
+                            </span>
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-mono font-bold ${
+                              log.status === "Taken"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                : "bg-red-50 text-red-700 border border-red-100"
+                            }`}>
+                              {log.status}
+                            </span>
+                          </div>
+                          <span className="block text-[9.5px] font-mono text-slate-400 mt-0.5">
+                            Logged: {new Date(log.loggedTime).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                        </div>
+                        <span className="text-lg">
+                          {log.status === "Taken" ? "🟢" : "🔴"}
                         </span>
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleToggleRead(notif.id)}
-                        className={`text-[10px] font-bold px-2 py-1 rounded-lg ${
-                          notif.read ? "bg-slate-100 text-slate-500" : "bg-white border border-amber-200 text-amber-800 font-extrabold shadow-sm cursor-pointer"
-                        }`}
-                        title={notif.read ? "Mark as unread" : "Mark as read"}
-                      >
-                        {notif.read ? "Unread" : "Mark Read"}
-                      </button>
-                      <button
-                        onClick={() => handleDismissNotification(notif.id)}
-                        className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-red-500 cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-100">
-                <p className="text-xs text-slate-500 leading-normal italic font-semibold">
-                  All alerts processed. Your medication calendar is perfectly clear.
-                </p>
+                )}
               </div>
             )}
           </div>
+
+          {/* ADD REMINDER INTERACTIVE REGULATORY MODAL */}
+          <AnimatePresence>
+            {isAddReminderOpen && (
+              <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="bg-white rounded-3xl p-6 border border-slate-150 shadow-2xl max-w-sm w-full space-y-4 pointer-events-auto"
+                >
+                  <div className="flex items-center justify-between border-b border-slate-105 pb-3">
+                    <h3 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight flex items-center gap-1.5">
+                      💊 <span>Add Daily Alert</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddReminderOpen(false)}
+                      className="p-1 hover:bg-slate-100 rounded-full text-slate-400 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3.5 text-left text-xs text-slate-700">
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800">Medication Name</label>
+                      <input 
+                        type="text"
+                        placeholder="e.g. Paracetamol, Metformin"
+                        value={newReminderForm.medicationName}
+                        onChange={(e) => setNewReminderForm(p => ({ ...p, medicationName: e.target.value }))}
+                        className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800">Dosage</label>
+                        <input 
+                          type="text"
+                          placeholder="e.g. 1 Tablet"
+                          value={newReminderForm.dosage}
+                          onChange={(e) => setNewReminderForm(p => ({ ...p, dosage: e.target.value }))}
+                          className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800">Schedule Time</label>
+                        <input 
+                          type="time"
+                          value={newReminderForm.time}
+                          onChange={(e) => setNewReminderForm(p => ({ ...p, time: e.target.value }))}
+                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono focus:bg-white focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800 font-sans">Frequency</label>
+                        <select
+                          value={newReminderForm.frequency}
+                          onChange={(e) => setNewReminderForm(p => ({ ...p, frequency: e.target.value as any }))}
+                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none"
+                        >
+                          <option value="Once daily">Once daily</option>
+                          <option value="Twice daily">Twice daily</option>
+                          <option value="Three times daily">Three times daily</option>
+                          <option value="Four times daily">Four times daily</option>
+                          <option value="As needed">As needed</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block font-bold text-slate-800">Food Instruction</label>
+                        <select
+                          value={newReminderForm.foodInstruction}
+                          onChange={(e) => setNewReminderForm(p => ({ ...p, foodInstruction: e.target.value as any }))}
+                          className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:bg-white focus:outline-none"
+                        >
+                          <option value="None">No restriction</option>
+                          <option value="With food">With food</option>
+                          <option value="Before food">Before food</option>
+                          <option value="After food">After food</option>
+                          <option value="Empty stomach">Empty stomach</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block font-bold text-slate-800">Operational Notes (optional)</label>
+                      <textarea
+                        placeholder="e.g. Morning dose, avoid cold beverages"
+                        value={newReminderForm.notes}
+                        onChange={(e) => setNewReminderForm(p => ({ ...p, notes: e.target.value }))}
+                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs h-16 resize-none focus:bg-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2.5 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddReminderOpen(false)}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAddNewReminder()}
+                      className="flex-1 py-2.5 rounded-xl bg-indigo-650 hover:bg-indigo-700 text-white font-black text-xs cursor-pointer shadow-md shadow-indigo-600/10"
+                    >
+                      Save Alarm
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
+
+          {/* REAL TIME REMINDER ALARM MODAL OVERLAY (RINGTONE AUDIO) */}
+          <AnimatePresence>
+            {activeAlertNotification && activeAlertNotification.show && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+                <motion.div
+                  initial={{ rotate: -1, scale: 0.93, opacity: 0 }}
+                  animate={{ rotate: 0, scale: 1, opacity: 1, y: [10, -5, 0] }}
+                  exit={{ scale: 0.95, opacity: 0 }}
+                  className="bg-white border-2 border-indigo-600 rounded-3xl p-6 shadow-2xl max-w-sm w-full text-center space-y-4 ring-4 ring-indigo-500/20"
+                >
+                  <div className="mx-auto w-14 h-14 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center animate-bounce text-2xl">
+                    🔔
+                  </div>
+                  
+                  <div className="space-y-1.5">
+                    <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-mono font-black rounded-lg uppercase tracking-wider animate-pulse">
+                      ⏰ Clinical Reminder Active
+                    </span>
+                    <h3 className="font-display font-black text-slate-955 text-base leading-tight">
+                      Take {activeAlertNotification.reminder.dosage} of {activeAlertNotification.reminder.medicationName}
+                    </h3>
+                    <p className="text-xs text-indigo-700 font-bold bg-indigo-50/20 p-2 rounded-xl border border-indigo-150/50">
+                      Food Guidance: {activeAlertNotification.reminder.foodInstruction}
+                    </p>
+                    {activeAlertNotification.reminder.notes && (
+                      <p className="text-[11px] text-slate-500 leading-normal italic">
+                        &quot;{activeAlertNotification.reminder.notes}&quot;
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-3 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => handleLogAdherence(activeAlertNotification.reminder.id, "Skipped")}
+                      className="flex-1 py-2.5 rounded-xl bg-slate-50 hover:bg-slate-105 border border-slate-200 text-slate-500 font-bold text-xs cursor-pointer"
+                    >
+                      Skip Dose
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleLogAdherence(activeAlertNotification.reminder.id, "Taken")}
+                      className="flex-1 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-black text-xs cursor-pointer shadow-lg shadow-green-600/10"
+                    >
+                      I Took My Meds
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+          </AnimatePresence>
 
           {/* 5. Order History Card */}
           <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
@@ -1617,8 +2479,6 @@ export default function Dashboard({
               </p>
             )}
           </div>
-
-        </div>
 
       </div>
 

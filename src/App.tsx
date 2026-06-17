@@ -881,20 +881,22 @@ To ensure safety: if you are asking about a drug (such as **Advil** or **Sudafed
     <div id="caremed-app-root" className="min-h-screen flex flex-col bg-slate-50 text-slate-800 font-sans selection:bg-blue-100 selection:text-blue-900">
       
       {/* Top sticky navbar */}
-      <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        cartCount={cartCount}
-        profile={profile}
-        onOpenProfile={() => setIsProfileOpen(true)}
-        user={user}
-        isAdmin={adminRecord !== null}
-        onSignIn={handleSignIn}
-        onSignOut={handleSignOut}
-        tenantConfig={tenantConfig}
-        showInstallButton={!!installPrompt}
-        onInstall={handleInstallApp}
-      />
+      {activeTab !== "pharmacy-console" && (
+        <Navbar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          cartCount={cartCount}
+          profile={profile}
+          onOpenProfile={() => setIsProfileOpen(true)}
+          user={user}
+          isAdmin={adminRecord !== null}
+          onSignIn={handleSignIn}
+          onSignOut={handleSignOut}
+          tenantConfig={tenantConfig}
+          showInstallButton={!!installPrompt}
+          onInstall={handleInstallApp}
+        />
+      )}
 
       {/* Main viewport */}
       <main className="flex-1">
@@ -979,6 +981,7 @@ To ensure safety: if you are asking about a drug (such as **Advil** or **Sudafed
                 adminRecord={adminRecord}
                 activePharmacyId={activePharmacyId}
                 tenantConfig={tenantConfig}
+                liveNotifications={liveNotifications}
               />
             )}
           </>

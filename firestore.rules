@@ -23,7 +23,7 @@ service cloud.firestore {
     // Role detection: Direct email whitelist + Firestore DB Admin records
     function isAdmin() {
       return isSignedIn() && (
-        ('email' in request.auth.token && request.auth.token.email != null && request.auth.token.email.lower() == 'brythema@gmail.com') ||
+        ('email' in request.auth.token && request.auth.token.email != null && request.auth.token.email == 'brythema@gmail.com') ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -48,7 +48,7 @@ service cloud.firestore {
     function isValidOrder(data) {
       return data.keys().hasAll(['id', 'userId', 'total', 'status', 'timestamp', 'patientName']) &&
              data.id is string && data.id.size() <= 128 &&
-             data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
+             data.userId is string && (data.userId == 'offline-user' || data.userId == request.auth.uid || isAdmin()) &&
              (data.total is int || data.total is float) && data.total >= 0.0 &&
              data.status in ['Reviewing', 'Accepted', 'Prescription Requested', 'Rejected', 'Dispensed', 'Ready for Pickup', 'Out for Delivery', 'Delivered'] &&
              data.timestamp is string && data.timestamp.size() <= 100 &&
@@ -165,14 +165,14 @@ service cloud.firestore {
 
     // Global Orders Registry
     match /orders/{orderId} {
-      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || resource.data.userId == 'offline-user';
       allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       
-      allow create: if isEmailVerified() && 
+      allow create: if (isEmailVerified() || request.auth == null) && 
                        isValidId(orderId) && 
                        isValidOrder(request.resource.data);
                        
-      allow update: if isEmailVerified() && 
+      allow update: if (isEmailVerified() || isAdmin()) && 
                        isValidId(orderId) && 
                        (resource.data.userId == request.auth.uid || isAdmin()) && 
                        request.resource.data.userId == resource.data.userId && 
@@ -188,14 +188,14 @@ service cloud.firestore {
 
     // Multi-tenant Tenant specific Orders Registry
     match /pharmacies/{pharmacyId}/orders/{orderId} {
-      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get: if (isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin())) || resource.data.userId == 'offline-user';
       allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
       
-      allow create: if isEmailVerified() && 
+      allow create: if (isEmailVerified() || request.auth == null) && 
                        isValidId(orderId) && 
                        isValidOrder(request.resource.data);
                        
-      allow update: if isEmailVerified() && 
+      allow update: if (isEmailVerified() || isAdmin()) && 
                        isValidId(orderId) && 
                        (resource.data.userId == request.auth.uid || isAdmin()) && 
                        request.resource.data.userId == resource.data.userId && 
@@ -251,7 +251,7 @@ service cloud.firestore {
     // Admin List
     match /admins/{userId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && ((userId == request.auth.uid && 'email' in request.auth.token && request.auth.token.email != null && request.auth.token.email.lower() == 'brythema@gmail.com') || isAdmin());
+      allow write: if isSignedIn() && ((userId == request.auth.uid && 'email' in request.auth.token && request.auth.token.email != null && request.auth.token.email == 'brythema@gmail.com') || isAdmin());
     }
 
     // Clinical Audit Logs

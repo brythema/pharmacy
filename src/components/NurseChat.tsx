@@ -284,7 +284,7 @@ export default function NurseChat({
       <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden relative">
         
         {/* Top Console Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 bg-white border-b border-slate-200 relative z-30">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 bg-white border-b border-slate-200 relative z-[45]">
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="w-10 h-10 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs tracking-wider shadow-md overflow-hidden">
@@ -320,7 +320,7 @@ export default function NurseChat({
               </button>
 
               {isMobileHistoryOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-xl z-50 p-2.5 space-y-1.5 max-h-96 overflow-y-auto">
+                <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl border border-slate-200 shadow-xl z-[100] p-2.5 space-y-1.5 max-h-96 overflow-y-auto">
                   <div className="flex items-center justify-between px-2 py-1.5 border-b border-slate-100">
                     <span className="text-[10px] font-mono text-slate-450 uppercase font-bold tracking-wider">Archives</span>
                     <button

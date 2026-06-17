@@ -7,7 +7,7 @@ import {
   Send, Phone, Check, RefreshCw, Key, ShieldAlert, FileText, 
   AlertTriangle, Copy, ExternalLink, Calendar, Truck, CheckCircle, Clock, X,
   Trash2, UserPlus, Shield, ClipboardList, PenTool, CheckSquare, PlusSquare,
-  Inbox, AlertCircle, CheckCheck, Search
+  Inbox, AlertCircle, CheckCheck, Search, Bell
 } from "lucide-react";
 import { normalizePhoneNumber, generateSyntheticProfiles } from "../utils";
 
@@ -24,6 +24,7 @@ interface PharmacyConsoleProps {
     pharmacyAddress: string;
     whatsappNumber: string;
   };
+  liveNotifications?: SystemNotification[];
 }
 
 export default function PharmacyConsole({ 
@@ -31,7 +32,8 @@ export default function PharmacyConsole({
   staffUser,
   adminRecord,
   activePharmacyId = null,
-  tenantConfig
+  tenantConfig,
+  liveNotifications = []
 }: PharmacyConsoleProps) {
   // Real-time Firestore Sync state
   const [orders, setOrders] = useState<Order[]>([]);
@@ -125,6 +127,7 @@ export default function PharmacyConsole({
   
   // Support helpdesk state variables
   const [supportRooms, setSupportRooms] = useState<any[]>([]);
+  const [isNotificationsDropdownOpen, setIsNotificationsDropdownOpen] = useState(false);
   const [selectedSupportRoomId, setSelectedSupportRoomId] = useState<string | null>(null);
   const [supportMessages, setSupportMessages] = useState<any[]>([]);
   const [supportReplyText, setSupportReplyText] = useState("");
@@ -211,6 +214,19 @@ export default function PharmacyConsole({
   const [isSavingProfile, setIsSavingProfile] = useState<boolean>(false);
   const [adminActiveHistoryTab, setAdminActiveHistoryTab] = useState<"customer" | "prescription" | "orders" | "chats" | "payments" | "logins">("customer");
 
+  // Manual new patient registration form states
+  const [isAddingPatient, setIsAddingPatient] = useState<boolean>(false);
+  const [addPatientName, setAddPatientName] = useState<string>("");
+  const [addPatientEmail, setAddPatientEmail] = useState<string>("");
+  const [addPatientPhone, setAddPatientPhone] = useState<string>("");
+  const [addPatientAge, setAddPatientAge] = useState<string>("");
+  const [addPatientGender, setAddPatientGender] = useState<string>("");
+  const [addPatientAllergies, setAddPatientAllergies] = useState<string>("");
+  const [addPatientChronic, setAddPatientChronic] = useState<string>("");
+  const [addPatientMedications, setAddPatientMedications] = useState<string>("");
+  const [addPatientNotes, setAddPatientNotes] = useState<string>("");
+  const [isCreatingPatient, setIsCreatingPatient] = useState<boolean>(false);
+
   // Prefill profile edit inputs when a patient is selected
   useEffect(() => {
     if (selectedPatientId) {
@@ -279,6 +295,86 @@ export default function PharmacyConsole({
       alert("Unauthorized: Please log in using the administrator's authorized account credentials.");
     } finally {
       setIsSavingProfile(false);
+    }
+  };
+
+  // Create / Register a manual patient profile in Firestore
+  const handleCreatePatient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addPatientName.trim()) {
+      alert("Please provide the patient's full name.");
+      return;
+    }
+    
+    setIsCreatingPatient(true);
+    try {
+      const newProfileDocRef = doc(collection(db, "profiles"));
+      const generatedId = newProfileDocRef.id;
+      
+      const newHistoryEvent = {
+        id: "ch-" + Date.now(),
+        event: "Account Manually Created by Clinical Administrator",
+        timestamp: new Date().toLocaleString("en-NG"),
+        details: `Profile initialized by clinical administrator (Age: ${addPatientAge || "N/A"}, Gender: ${addPatientGender || "N/A"}, Allergies: ${addPatientAllergies || "None"}).`
+      };
+
+      const payload = {
+        name: addPatientName.trim(),
+        email: addPatientEmail.trim(),
+        phoneNumber: addPatientPhone.trim(),
+        age: addPatientAge ? parseInt(addPatientAge, 10) || 0 : 0,
+        gender: addPatientGender,
+        allergies: addPatientAllergies,
+        chronicConditions: addPatientChronic,
+        currentMedications: addPatientMedications,
+        notes: addPatientNotes,
+        isConfirmed: true,
+        customerHistory: [newHistoryEvent],
+        prescriptionHistory: [],
+        orderHistory: [],
+        uploadedDocuments: []
+      };
+
+      await setDoc(newProfileDocRef, payload);
+      alert(`Successfully registered new patient: ${addPatientName}`);
+      
+      setAddPatientName("");
+      setAddPatientEmail("");
+      setAddPatientPhone("");
+      setAddPatientAge("");
+      setAddPatientGender("");
+      setAddPatientAllergies("");
+      setAddPatientChronic("");
+      setAddPatientMedications("");
+      setAddPatientNotes("");
+      
+      setIsAddingPatient(false);
+      setSelectedPatientId(generatedId);
+      setSelectedPatientIdForManagement(generatedId);
+    } catch (err: any) {
+      console.error("Failed to register new manual patient profile:", err);
+      alert("Error registering new patient profile: " + (err.message || String(err)));
+    } finally {
+      setIsCreatingPatient(false);
+    }
+  };
+
+  // Delete patient profile from Firestore
+  const handleDeletePatient = async (patientId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!window.confirm("Are you sure you want to delete this patient profile? This action will permanently remove all medical data from Firestore.")) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, "profiles", patientId));
+      if (selectedPatientId === patientId) {
+        setSelectedPatientId(null);
+        setSelectedPatientIdForManagement(null);
+      }
+      alert("Successfully deleted patient profile from the database.");
+    } catch (err: any) {
+      console.error("Failed to delete patient profile:", err);
+      alert("Unauthorized or error deleting profile: " + (err.message || String(err)));
     }
   };
 
@@ -1504,6 +1600,131 @@ export default function PharmacyConsole({
     setPatientPage(1);
   }, [searchPatientText, patientStatusFilter]);
 
+  // Synchronize dynamic actions with Firestore for the clinic's notification feed
+  const handleMarkAllNotificationsRead = async () => {
+    const unreadList = (liveNotifications || []).filter(n => !n.read);
+    if (unreadList.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      unreadList.forEach(n => {
+        batch.update(doc(db, "notifications", n.id), { read: true });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Administrative: Failed to clear unread alerts status:", err);
+    }
+  };
+
+  const handleAddressNotification = async (notif: SystemNotification) => {
+    setIsNotificationsDropdownOpen(false);
+    
+    // Safety check check & clear read status in firestore
+    try {
+      if (!notif.read) {
+        await updateDoc(doc(db, "notifications", notif.id), { read: true });
+      }
+    } catch (err) {
+      console.warn("Operational: Failed to clear read flag on live alert:", err);
+    }
+
+    // 1. Order placements / pipeline dispatches
+    if (notif.type === "orderPlaced" || notif.type === "orderUpdate") {
+      let orderId: string | null = null;
+      const orderIdMatch = notif.message.match(/#([A-Za-z0-9_-]+)/);
+      if (orderIdMatch) {
+        orderId = orderIdMatch[1];
+      }
+      
+      const foundOrder = orders.find(o => o.id === orderId || (orderId && o.id.toLowerCase().includes(orderId.toLowerCase())));
+      if (foundOrder) {
+        setSelectedOrder(foundOrder);
+        setActiveSubTab("orders");
+        setAdminPageView("orders");
+        setStatusFilter("all");
+      } else {
+        setActiveSubTab("orders");
+        setAdminPageView("orders");
+        setStatusFilter("all");
+      }
+    }
+    // 2. Prescription uploads by users
+    else if (notif.type === "prescriptionUpload" || notif.type === "prescriptionApproval" || notif.type === "prescriptionRejection") {
+      // Find matching patient profile
+      const matchedPatient = profiles.find(p => 
+        notif.message.toLowerCase().includes(p.name.toLowerCase()) || 
+        (p.email && notif.message.toLowerCase().includes(p.email.toLowerCase()))
+      );
+
+      if (matchedPatient) {
+        setSelectedPatientId(matchedPatient.id);
+        setSelectedPatientIdForManagement(matchedPatient.id);
+        setPatientProfileActiveTab("documents");
+        setActiveSubTab("conversations");
+        setAdminPageView("patients");
+      } else {
+        // Fallback: Show AI Reviews
+        setActiveSubTab("orders");
+        setAdminPageView("ai_reviews");
+        setStatusFilter("Reviewing");
+      }
+    }
+    // 3. Conversations / helpdesk tickets
+    else if (notif.type === "customerMessage" || notif.type === "adminMessage") {
+      // Find matching helpdesk room
+      const matchedRoom = supportRooms.find(r => 
+        r.id === notif.userId || 
+        notif.message.toLowerCase().includes(r.userName.toLowerCase()) || 
+        (r.userEmail && notif.message.toLowerCase().includes(r.userEmail.toLowerCase()))
+      );
+
+      if (matchedRoom) {
+        setSelectedSupportRoomId(matchedRoom.id);
+        setActiveSubTab("support_helpdesk");
+        setAdminPageView("homepage");
+      } else {
+        // Find matching patient for standard patient chat
+        const matchedPatient = profiles.find(p => 
+          p.id === notif.userId || 
+          notif.message.toLowerCase().includes(p.name.toLowerCase()) || 
+          (p.email && notif.message.toLowerCase().includes(p.email.toLowerCase()))
+        );
+        if (matchedPatient) {
+          setSelectedPatientId(matchedPatient.id);
+          setPatientProfileActiveTab("chats");
+          setActiveSubTab("conversations");
+          setAdminPageView("patients");
+        } else {
+          setActiveSubTab("support_helpdesk");
+          setAdminPageView("homepage");
+        }
+      }
+    }
+    // 4. Registration of a new customer
+    else if (notif.type === "registration") {
+      const matchedPatient = profiles.find(p => 
+        notif.message.toLowerCase().includes(p.name.toLowerCase()) || 
+        (p.email && notif.message.toLowerCase().includes(p.email.toLowerCase()))
+      );
+
+      if (matchedPatient) {
+        setSelectedPatientId(matchedPatient.id);
+        setSelectedPatientIdForManagement(matchedPatient.id);
+        setPatientProfileActiveTab("overview");
+        setActiveSubTab("conversations");
+        setAdminPageView("patients");
+      } else {
+        setActiveSubTab("conversations");
+        setAdminPageView("patients");
+        setPatientStatusFilter("all");
+      }
+    }
+    // 5. Default fallback
+    else {
+      setActiveSubTab("orders");
+      setAdminPageView("homepage");
+    }
+  };
+
   return (
     <div id="pharmacy-console" className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans">
       
@@ -1524,7 +1745,7 @@ export default function PharmacyConsole({
             </div>
           </div>
           
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center justify-center md:justify-end gap-3">
             {isAuthorized ? (
               <span className="inline-flex items-center gap-1 bg-emerald-950 text-emerald-400 text-xs font-mono px-3 py-1.5 rounded-full border border-emerald-800">
                 <ShieldCheck className="w-3.5 h-3.5" /> SECURE STAFF CONNECTEDED
@@ -1534,6 +1755,121 @@ export default function PharmacyConsole({
                 <ShieldAlert className="w-3.5 h-3.5" /> UNVERIFIED ACCESS LIMITS
               </span>
             )}
+
+            {/* Real-time Administrative Notification Center Bell */}
+            <div className="relative" id="admin-bell-parent">
+              <button
+                id="admin-notifications-bell-btn"
+                onClick={() => setIsNotificationsDropdownOpen(!isNotificationsDropdownOpen)}
+                className="relative p-2 text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded-xl transition duration-150 cursor-pointer flex items-center justify-center"
+                title="Clinical Alerts Feed"
+              >
+                <Bell className="w-5 h-5" />
+                {liveNotifications.some(n => !n.read) && (
+                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full animate-ping" />
+                )}
+                {liveNotifications.filter(n => !n.read).length > 0 && (
+                  <span className="absolute top-0 right-0 inline-flex items-center justify-center px-1.5 py-0.5 text-[8px] font-black font-mono leading-none text-white transform translate-x-1 -translate-y-1 bg-rose-600 rounded-full border border-slate-905">
+                    {liveNotifications.filter(n => !n.read).length}
+                  </span>
+                )}
+              </button>
+
+              {isNotificationsDropdownOpen && (
+                <div 
+                  id="admin-notifications-dropdown-menu"
+                  className="fixed sm:absolute top-20 sm:top-auto left-4 right-4 sm:left-auto sm:right-0 sm:mt-3 sm:w-96 bg-slate-900 border border-slate-850 rounded-2xl shadow-2xl z-[100] overflow-hidden"
+                  style={{ boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 15px rgba(59, 130, 246, 0.15)" }}
+                >
+                  <div className="p-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between">
+                    <div className="text-left">
+                      <h4 className="font-display font-black text-xs text-white uppercase tracking-wider">Clinical Alerts Feed</h4>
+                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
+                        {liveNotifications.filter(n => !n.read).length} urgent events pending task address
+                      </p>
+                    </div>
+                    {liveNotifications.some(n => !n.read) && (
+                      <button
+                        onClick={handleMarkAllNotificationsRead}
+                        className="text-[9px] font-mono font-bold text-blue-400 hover:text-blue-300 transition uppercase tracking-wider"
+                      >
+                        Clear All
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-850/60 font-sans">
+                    {liveNotifications.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400">
+                        <Inbox className="w-6 h-6 mx-auto text-slate-600 mb-2" />
+                        <p className="text-[11px] font-semibold">No system alerts triggered</p>
+                        <p className="text-[9px] text-slate-500 mt-0.5">Patient pipelines and inventory stocks are fully reconciled.</p>
+                      </div>
+                    ) : (
+                      liveNotifications.map((notif) => {
+                        const getIconDetails = () => {
+                          switch (notif.type) {
+                            case "orderPlaced":
+                              return { bg: "bg-blue-600/10 border-blue-500/20 text-blue-400", label: "📦 ORDER" };
+                            case "prescriptionUpload":
+                              return { bg: "bg-violet-600/10 border-violet-500/20 text-violet-400", label: "📄 RX UPLOAD" };
+                            case "customerMessage":
+                              return { bg: "bg-emerald-600/10 border-emerald-500/20 text-emerald-400", label: "💬 CHAT" };
+                            case "registration":
+                              return { bg: "bg-amber-600/10 border-amber-500/20 text-amber-400", label: "👥 REGISTERED" };
+                            default:
+                              return { bg: "bg-slate-600/10 border-slate-500/20 text-slate-400", label: "🔔 SYSTEM" };
+                          }
+                        };
+                        const iconStyle = getIconDetails();
+
+                        return (
+                          <div
+                            key={notif.id}
+                            onClick={() => handleAddressNotification(notif)}
+                            className={`p-3.5 hover:bg-slate-850 border-b border-slate-850/45 transition duration-150 flex gap-3 cursor-pointer text-left items-start group ${
+                              !notif.read ? "bg-blue-950/15" : ""
+                            }`}
+                          >
+                            <div className={`p-1.5 rounded-lg border shrink-0 mt-0.5 ${iconStyle.bg}`}>
+                              {notif.type === "orderPlaced" ? (
+                                <ShoppingBag className="w-3.5 h-3.5" />
+                              ) : notif.type === "customerMessage" ? (
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              ) : notif.type === "registration" ? (
+                                <Users className="w-3.5 h-3.5" />
+                              ) : (
+                                <FileText className="w-3.5 h-3.5" />
+                              )}
+                            </div>
+
+                            <div className="flex-1 min-w-0 text-left">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-[8px] font-mono font-bold tracking-wider uppercase opacity-80">
+                                  {iconStyle.label}
+                                </span>
+                                {!notif.read && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                                )}
+                              </div>
+                              <h5 className="font-display font-bold text-[11px] text-white mt-0.5 leading-tight group-hover:text-blue-400 transition">
+                                {notif.title}
+                              </h5>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-normal font-medium">
+                                {notif.message}
+                              </p>
+                              <span className="inline-flex items-center gap-1 text-[8px] font-mono text-slate-500 mt-1.5 font-bold uppercase tracking-wider group-hover:text-blue-300 transition">
+                                🎯 Tap to Address Origin →
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             <button
               id="back-to-portal-btn"
@@ -2320,7 +2656,7 @@ export default function PharmacyConsole({
               {/* Patient List Column */}
               <div className="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-200/80 overflow-hidden flex flex-col">
                 <div className="p-4 bg-slate-50 border-b border-slate-100 space-y-3">
-                  <div className="flex justify-between items-center">
+                  <div className="flex justify-between items-start">
                     <div>
                       <h3 className="font-display font-black text-slate-905 text-sm">
                         Patient Directory
@@ -2329,7 +2665,15 @@ export default function PharmacyConsole({
                         {profiles.length} total live accounts
                       </p>
                     </div>
-                    <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[9px] rounded font-mono font-bold">500+ scale</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingPatient(true)}
+                      className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[9px] rounded-lg font-mono font-bold flex items-center gap-1 shadow-sm transition hover:shadow cursor-pointer shrink-0"
+                      title="Register New Patient Profile"
+                    >
+                      <UserPlus className="w-3 h-3" />
+                      Add User
+                    </button>
                   </div>
 
                   {/* Active search container */}
@@ -2404,24 +2748,34 @@ export default function PharmacyConsole({
                                     key={p.id}
                                     id={`patient-row-${p.id}`}
                                     onClick={() => setSelectedPatientId(p.id)}
-                                    className={`p-3 transition duration-200 cursor-pointer flex items-center gap-3 text-left ${
+                                    className={`p-3 transition duration-200 cursor-pointer flex items-center justify-between gap-3 text-left ${
                                       isSelected ? "bg-amber-100/60 border-l-4 border-l-amber-500 font-bold" : "hover:bg-amber-50/40"
                                     }`}
                                   >
-                                    <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold font-mono shrink-0 text-[10px]">
-                                      {p.name.substring(0, 2).toUpperCase()}
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center justify-between gap-1 pb-0.5">
-                                        <h4 className="font-display font-medium text-[11px] text-slate-900 truncate">
-                                          {p.name}
-                                        </h4>
-                                        <span className="bg-amber-100 text-amber-800 border border-amber-200/50 text-[7px] px-1 rounded font-mono font-bold shrink-0 uppercase tracking-tight">New</span>
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                      <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold font-mono shrink-0 text-[10px]">
+                                        {p.name.substring(0, 2).toUpperCase()}
                                       </div>
-                                      <p className="text-[9px] text-slate-500 font-mono truncate">
-                                        Phone: {p.phoneNumber || "No contact"}
-                                      </p>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-1 pb-0.5">
+                                          <h4 className="font-display font-medium text-[11px] text-slate-900 truncate">
+                                            {p.name}
+                                          </h4>
+                                          <span className="bg-amber-100 text-amber-800 border border-amber-200/50 text-[7px] px-1 rounded font-mono font-bold shrink-0 uppercase tracking-tight">New</span>
+                                        </div>
+                                        <p className="text-[9px] text-slate-500 font-mono truncate">
+                                          Phone: {p.phoneNumber || "No contact"}
+                                        </p>
+                                      </div>
                                     </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeletePatient(p.id, e)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0 cursor-pointer"
+                                      title="Delete Patient Profile"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 );
                               })}
@@ -2443,24 +2797,34 @@ export default function PharmacyConsole({
                                     key={p.id}
                                     id={`patient-row-${p.id}`}
                                     onClick={() => setSelectedPatientId(p.id)}
-                                    className={`p-3 transition duration-200 cursor-pointer flex items-center gap-3 text-left ${
+                                    className={`p-3 transition duration-200 cursor-pointer flex items-center justify-between gap-3 text-left ${
                                       isSelected ? "bg-blue-50/60 border-l-4 border-l-blue-600 font-bold" : "hover:bg-slate-50"
                                     }`}
                                   >
-                                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold font-mono shrink-0 text-[10px]">
-                                      {p.name.substring(0, 2).toUpperCase()}
-                                    </div>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center justify-between gap-1 pb-0.5">
-                                        <h4 className="font-display font-medium text-[11px] text-slate-900 truncate">
-                                          {p.name}
-                                        </h4>
-                                        <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[7px] px-1 rounded font-mono font-bold shrink-0 uppercase tracking-tight">Active</span>
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                                      <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold font-mono shrink-0 text-[10px]">
+                                        {p.name.substring(0, 2).toUpperCase()}
                                       </div>
-                                      <p className="text-[9px] text-slate-500 font-mono truncate">
-                                        Phone: {p.phoneNumber || "No contact"}
-                                      </p>
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-1 pb-0.5">
+                                          <h4 className="font-display font-medium text-[11px] text-slate-900 truncate">
+                                            {p.name}
+                                          </h4>
+                                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-100 text-[7px] px-1 rounded font-mono font-bold shrink-0 uppercase tracking-tight">Active</span>
+                                        </div>
+                                        <p className="text-[9px] text-slate-500 font-mono truncate">
+                                          Phone: {p.phoneNumber || "No contact"}
+                                        </p>
+                                      </div>
                                     </div>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleDeletePatient(p.id, e)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0 cursor-pointer"
+                                      title="Delete Patient Profile"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
                                   </div>
                                 );
                               })}
@@ -5287,7 +5651,7 @@ export default function PharmacyConsole({
             setSelectedOrder(activeNotification.order);
             setActiveNotification((prev) => prev ? { ...prev, visible: false } : null);
           }}
-          className="fixed bottom-6 right-6 z-50 max-w-sm w-full bg-slate-900 hover:bg-slate-850 text-white rounded-2xl shadow-2xl border border-blue-500/30 hover:border-blue-400/60 p-5 flex flex-col gap-3 transition-all duration-300 transform translate-y-0 cursor-pointer group"
+          className="fixed bottom-24 right-6 z-50 max-w-sm w-full bg-slate-900 hover:bg-slate-850 text-white rounded-2xl shadow-2xl border border-blue-500/30 hover:border-blue-400/60 p-5 flex flex-col gap-3 transition-all duration-300 transform translate-y-0 cursor-pointer group"
           style={{ boxShadow: "0 20px 25px -5px rgb(0 0 0 / 0.3), 0 0 15px 2px rgba(59, 130, 246, 0.4)" }}
         >
           <div className="flex items-start gap-3">
@@ -5334,6 +5698,187 @@ export default function PharmacyConsole({
               <span>View Order</span>
               <ExternalLink className="w-3 h-3" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Patient Profile Registration Modal */}
+      {isAddingPatient && (
+        <div className="fixed inset-0 bg-slate-905/65 backdrop-blur-sm flex items-center justify-center p-4 z-[9999]">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden relative animate-in fade-in duration-200">
+            {/* Header */}
+            <div className="bg-slate-905 text-white p-5 flex justify-between items-center">
+              <div>
+                <h3 className="font-display font-black text-sm text-white flex items-center gap-2">
+                  <UserPlus className="w-5 h-5 text-blue-500" />
+                  Register New Patient Profile
+                </h3>
+                <p className="text-[10px] text-slate-400 font-mono uppercase mt-1">
+                  Manual Electronic Health Record (EHR) Registration
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddingPatient(false)}
+                className="text-slate-400 hover:text-white transition cursor-pointer p-1 rounded-lg hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <form onSubmit={handleCreatePatient} className="p-6 space-y-4 max-h-[500px] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 text-left">
+                  <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                    Full Name <span className="text-rose-550">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={addPatientName}
+                    onChange={(e) => setAddPatientName(e.target.value)}
+                    placeholder="Enter full name of patient"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400"
+                  />
+                </div>
+
+                <div className="text-left">
+                  <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                    Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={addPatientEmail}
+                    onChange={(e) => setAddPatientEmail(e.target.value)}
+                    placeholder="patient@example.com"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400"
+                  />
+                </div>
+
+                <div className="text-left">
+                  <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                    Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={addPatientPhone}
+                    onChange={(e) => setAddPatientPhone(e.target.value)}
+                    placeholder="+234..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400"
+                  />
+                </div>
+
+                <div className="text-left">
+                  <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                    Age
+                  </label>
+                  <input
+                    type="number"
+                    value={addPatientAge}
+                    onChange={(e) => setAddPatientAge(e.target.value)}
+                    placeholder="e.g. 35"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400"
+                  />
+                </div>
+
+                <div className="text-left">
+                  <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                    Gender
+                  </label>
+                  <select
+                    value={addPatientGender}
+                    onChange={(e) => setAddPatientGender(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="text-left">
+                <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                  Known Drug Allergies
+                </label>
+                <textarea
+                  rows={2}
+                  value={addPatientAllergies}
+                  onChange={(e) => setAddPatientAllergies(e.target.value)}
+                  placeholder="e.g. Penicillin, Sulfa drugs, None"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 resize-none"
+                />
+              </div>
+
+              <div className="text-left">
+                <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                  Chronic Medical Conditions
+                </label>
+                <textarea
+                  rows={2}
+                  value={addPatientChronic}
+                  onChange={(e) => setAddPatientChronic(e.target.value)}
+                  placeholder="e.g. Hypertension, Diabetes, Asthma"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 resize-none"
+                />
+              </div>
+
+              <div className="text-left">
+                <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                  Current Medications
+                </label>
+                <textarea
+                  rows={2}
+                  value={addPatientMedications}
+                  onChange={(e) => setAddPatientMedications(e.target.value)}
+                  placeholder="e.g. Lisinopril 10mg daily, Metformin 500mg"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 resize-none"
+                />
+              </div>
+
+              <div className="text-left">
+                <label className="block text-[10px] font-mono font-bold text-slate-550 uppercase mb-1.5">
+                  Clinical Care Notes / General Remarks
+                </label>
+                <textarea
+                  rows={3}
+                  value={addPatientNotes}
+                  onChange={(e) => setAddPatientNotes(e.target.value)}
+                  placeholder="Additional relevant patient care details or observation notes"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-slate-400 resize-none"
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 justify-end pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingPatient(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-705 text-xs rounded-xl font-bold transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isCreatingPatient}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-xl font-bold shadow-md transition disabled:opacity-40 cursor-pointer flex items-center gap-1.5"
+                >
+                  {isCreatingPatient ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Register Patient</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
