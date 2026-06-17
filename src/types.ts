@@ -23,6 +23,7 @@ export interface PatientProfile {
   currentMedications: string;
   notes: string;
   phoneNumber?: string;
+  email?: string;
   isConfirmed?: boolean; // Clinical approval state for AI Nurse tracker
   nextOfKinName?: string; // Emergency contact full name
   nextOfKinPhone?: string; // Emergency contact phone
@@ -32,6 +33,8 @@ export interface PatientProfile {
   pharmacyStatus?: string;
   verificationStatus?: string;
   medicalHistory?: string;
+  bloodGroup?: string;
+  genotype?: string;
   uploadedDocuments?: Array<{
     id: string;
     name: string;
@@ -103,7 +106,7 @@ export interface Order {
   id: string;
   items: CartItem[];
   total: number;
-  status: "Reviewing" | "Dispensed" | "Ready for Pickup" | "Out for Delivery" | "Delivered";
+  status: "Reviewing" | "Accepted" | "Prescription Requested" | "Rejected" | "Dispensed" | "Ready for Pickup" | "Out for Delivery" | "Delivered";
   timestamp: string;
   patientName: string;
   userId?: string;

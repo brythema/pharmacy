@@ -16,10 +16,10 @@ interface OrdersProps {
 }
 
 export default function Orders({ orders, tenantConfig }: OrdersProps) {
-  const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+  const pharmacyName = tenantConfig?.pharmacyName || "Bmedix";
   const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
   const pharmacyAddress = tenantConfig?.pharmacyAddress || "Abuja, Nigeria";
-  const whatsappNumber = tenantConfig?.whatsappNumber || "2348123456789";
+  const whatsappNumber = tenantConfig?.whatsappNumber || "2347042776167";
 
   const [reminders, setReminders] = useState<Record<string, { enabled: boolean; intervalDays: number; timestamp: string; frequency?: string }>>(() => {
     try {

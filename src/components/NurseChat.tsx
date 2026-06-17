@@ -38,7 +38,7 @@ export default function NurseChat({
   const [isMobileHistoryOpen, setIsMobileHistoryOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+  const pharmacyName = tenantConfig?.pharmacyName || "Bmedix";
   const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
 
   const presetInquiries = [

@@ -197,9 +197,28 @@
         "readAt": { "type": "number" }
       },
       "required": ["id", "senderId", "senderName", "senderRole", "content", "createdAt", "isRead"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Clinical operator action auditable logs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "operatorEmail": { "type": "string" },
+        "orderId": { "type": "string" },
+        "patientName": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "operatorEmail", "orderId", "patientName", "action"]
     }
   },
   "firestore": {
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Clinical operator action audit logs"
+    },
     "/support_rooms/{roomId}": {
       "schema": "SupportRoom",
       "description": " pharmacist customer helpdesk workspace tickets"

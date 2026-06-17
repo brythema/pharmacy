@@ -10,7 +10,7 @@ import PharmacyConsole from "./components/PharmacyConsole";
 import WelcomeIndex from "./components/WelcomeIndex";
 import SupportMessaging from "./components/SupportMessaging";
 import { Drug, PatientProfile, Message, CartItem, Order, AdminRecord, SystemNotification } from "./types";
-import { Plus, X, HeartPulse, Sparkles, User, HelpCircle, ShieldAlert } from "lucide-react";
+import { Plus, X, HeartPulse, Sparkles, User, HelpCircle, ShieldAlert, CheckCircle2 } from "lucide-react";
 import { auth, db, googleProvider, handleFirestoreError, OperationType, createNotification } from "./firebase";
 import { signInWithPopup, signOut, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, User as FirebaseUser } from "firebase/auth";
 import { doc, setDoc, updateDoc, collection, query, where, orderBy, onSnapshot, writeBatch } from "firebase/firestore";
@@ -28,6 +28,9 @@ export default function App() {
   const [cartCount, setCartCount] = useState<number>(0);
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [pendingConfirmOrderId, setPendingConfirmOrderId] = useState<string | null>(() => {
+    return localStorage.getItem("pending_confirm_order_id") || null;
+  });
   const [messages, setMessages] = useState<Message[]>([]);
   const [liveNotifications, setLiveNotifications] = useState<SystemNotification[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string>(() => {
@@ -35,10 +38,32 @@ export default function App() {
   });
   const [chatLoading, setChatLoading] = useState<boolean>(false);
   const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast((prev) => (prev && prev.message === message ? null : prev));
+    }, 6000);
+  };
 
   useEffect(() => {
     localStorage.setItem("caremed_current_convo_id", currentConversationId);
   }, [currentConversationId]);
+
+  // Real-time confirmation observer to clear cart when admin transitions order status
+  useEffect(() => {
+    if (!pendingConfirmOrderId) return;
+    const pendingOrder = orders.find((o) => o.id === pendingConfirmOrderId);
+    if (pendingOrder && pendingOrder.status !== "Reviewing") {
+      setCartItems([]);
+      setCartCount(0);
+      localStorage.removeItem("caremed_cart");
+      setPendingConfirmOrderId(null);
+      localStorage.removeItem("pending_confirm_order_id");
+      showToast(`🎉 Order confirmed! Bmedix dispensary has approved your medication request (${pendingConfirmOrderId}). Your cart has been unlocked and cleared.`, "success");
+    }
+  }, [orders, pendingConfirmOrderId]);
   const [pendingDrugContext, setPendingDrugContext] = useState<Drug | null>(null);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [profileFetched, setProfileFetched] = useState<boolean>(false);
@@ -176,9 +201,12 @@ export default function App() {
       }
     }, (err) => {
       console.warn("Blocked live inventory read, utilizing local fallback.", err);
+      import("./data/drugs").then(({ DRUG_CATALOG }) => {
+        setDrugs(DRUG_CATALOG);
+      });
     });
     return () => unsubscribeDrugs();
-  }, []);
+  }, [user]);
 
   // Firebase Auth and Firestore Cloud Sync Engine
   useEffect(() => {
@@ -356,7 +384,7 @@ export default function App() {
           } else {
             // Auto seed welcome thread
             const actualNurseName = tenantConfig?.nurseName || "Nurse Sarah";
-            const actualPharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+            const actualPharmacyName = tenantConfig?.pharmacyName || "Bmedix";
             const welcomeText = `Hello! I am ${actualNurseName}, your ${actualPharmacyName} AI Nurse tracker. I can help audit your care profile and check drug safety parameters immediately. Ask me any medical questions or sync your cloud account above!`;
             const seedId = "se-welcome";
             const seed: Message = {
@@ -468,7 +496,7 @@ export default function App() {
       if (email.toLowerCase() === "admin") {
         email = "brythema@gmail.com";
       } else {
-        email = `${email}@hmedix.com`;
+        email = `${email}@bmedix.com`;
       }
     }
 
@@ -671,12 +699,23 @@ I will continuously examine these factors when auditing your pharmacy cart or an
         const updatedOrders = [newOrder, ...orders];
         setOrders(updatedOrders);
         localStorage.setItem("caremed_orders", JSON.stringify(updatedOrders));
+        
+        // Write the guest order to Firestore so the admin page receives it!
+        await Promise.all([
+          setDoc(doc(db, ordersPath, transactionId), cleanObj(newOrder)),
+          createNotification({
+            userId: "admin",
+            title: "New Guest Order Placed",
+            message: `Order #${transactionId} placed by Guest ${newOrder.patientName} for ₦${newOrder.total.toLocaleString("en-NG")}.`,
+            type: "orderPlaced"
+          })
+        ]);
       }
 
       // Prefill and redirect to WhatsApp
-      const whatsappNum = tenantConfig?.whatsappNumber || "2348123456789";
+      const whatsappNum = tenantConfig?.whatsappNumber || "2347042776167";
       const cleanPhone = normalizePhoneNumber(whatsappNum);
-      const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+      const pharmacyName = tenantConfig?.pharmacyName || "Bmedix";
       const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
       
       const hasPrescription = cartItems.some(item => item.drug.requiresPrescription);
@@ -700,64 +739,13 @@ I will continuously examine these factors when auditing your pharmacy cart or an
       
       window.open(whatsappURL, "_blank", "noopener,noreferrer");
 
-      // Reset shopping cart
-      setCartItems([]);
-      setCartCount(0);
-      localStorage.removeItem("caremed_cart");
+      // Save pending confirm order ID
+      setPendingConfirmOrderId(transactionId);
+      localStorage.setItem("pending_confirm_order_id", transactionId);
 
       // Show a clean clinical workflow feedback and route back to catalog
-      alert("Checkout completed! Your order has been cataloged onto the admin dashboard and you are being redirected to WhatsApp to complete confirmation.");
+      showToast("Checkout successful! We have redirected you to WhatsApp to complete pharmacist confirmation. Your cart is locked until confirmed.", "info");
       setActiveTab("catalog");
-
-      // Dynamic state simulation for user experience!
-      // Transitions "Reviewing" -> "Dispensed" -> "Out for Delivery"
-      setTimeout(async () => {
-        if (user) {
-          try {
-            await Promise.all([
-              updateDoc(doc(db, ordersPath, transactionId), { status: "Dispensed" }),
-              createNotification({
-                userId: user.uid,
-                title: "Order Processed",
-                message: `Your medical order #${transactionId} has been Dispensed by the pharmacy.`,
-                type: "orderUpdate"
-              })
-            ]);
-          } catch (err) {
-            console.error("Order status update failed:", err);
-          }
-        } else {
-          setOrders((prevOrders) =>
-            prevOrders.map((o) =>
-              o.id === transactionId ? { ...o, status: "Dispensed" } : o
-            )
-          );
-        }
-      }, 15000);
-
-      setTimeout(async () => {
-        if (user) {
-          try {
-            await Promise.all([
-              updateDoc(doc(db, ordersPath, transactionId), { status: "Out for Delivery" }),
-              createNotification({
-                userId: user.uid,
-                title: "Order out for Delivery",
-                message: `Your medical order #${transactionId} has been hand-off to clinical dispatch and is Out for Delivery!`,
-                type: "orderUpdate"
-              })
-            ]);
-          } catch (err) {
-            console.error("Order status update failed:", err);
-          }
-        } else {
-          setOrders((prevOrders) =>
-            prevOrders.map((o) =>
-              o.id === transactionId ? { ...o, status: "Out for Delivery" } : o
-            )
-          );
-        }
-      }, 45000);
 
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `${ordersPath}/${transactionId}`);
@@ -978,6 +966,7 @@ To ensure safety: if you are asking about a drug (such as **Advil** or **Sudafed
                 onOpenProfile={() => setIsProfileOpen(true)}
                 tenantConfig={tenantConfig}
                 isCheckingOut={isCheckingOut}
+                pendingConfirmOrderId={pendingConfirmOrderId}
               />
             )}
 
@@ -1004,6 +993,41 @@ To ensure safety: if you are asking about a drug (such as **Advil** or **Sudafed
           onClose={() => setIsProfileOpen(false)}
           canClose={!!(profile && profile.name && profile.nextOfKinName && profile.nextOfKinPhone && profile.nextOfKinRelation)}
         />
+      )}
+
+      {toast && (
+        <div id="system-toast-alert" className="fixed bottom-6 right-6 z-50 max-w-sm w-[calc(100vw-3rem)] bg-white border border-slate-205 rounded-2xl shadow-2xl p-4 flex gap-3 items-start animate-fade-in translate-y-0 opacity-100 transition duration-300">
+          <div className={`p-2 rounded-xl border shrink-0 ${
+            toast.type === "success" 
+              ? "bg-emerald-50 border-emerald-100 text-emerald-600" 
+              : toast.type === "error" 
+              ? "bg-rose-50 border-rose-100 text-rose-600" 
+              : "bg-blue-50 border-blue-100 text-blue-600"
+          }`}>
+            {toast.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : toast.type === "error" ? (
+              <ShieldAlert className="w-5 h-5" />
+            ) : (
+              <Sparkles className="w-5 h-5 text-blue-600 animate-pulse" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0 pr-4 text-left">
+            <h5 className="font-sans font-extrabold text-slate-800 text-[10px] uppercase tracking-wider font-mono">
+              System Notification
+            </h5>
+            <p className="text-xs text-slate-650 font-semibold mt-1 leading-normal">
+              {toast.message}
+            </p>
+          </div>
+          <button 
+            type="button"
+            onClick={() => setToast(null)} 
+            className="text-slate-400 hover:text-slate-700 p-1 hover:bg-slate-50 rounded-lg shrink-0 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
 
     </div>

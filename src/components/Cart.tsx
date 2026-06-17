@@ -18,6 +18,7 @@ interface CartProps {
     whatsappNumber: string;
   };
   isCheckingOut?: boolean;
+  pendingConfirmOrderId?: string | null;
 }
 
 export default function Cart({
@@ -29,10 +30,12 @@ export default function Cart({
   onOpenProfile,
   tenantConfig,
   isCheckingOut = false,
+  pendingConfirmOrderId = null,
 }: CartProps) {
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditReport, setAuditReport] = useState<string | null>(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const subtotal = cartItems.reduce((acc, item) => acc + item.drug.price * item.quantity, 0);
   const containsPrescription = cartItems.some((item) => item.drug.requiresPrescription);
@@ -41,6 +44,7 @@ export default function Cart({
     if (cartItems.length === 0 || auditLoading) return;
     setAuditLoading(true);
     setAuditReport(null);
+    setErrorMsg(null);
 
     try {
       const response = await fetch("/api/nurse/cart-audit", {
@@ -58,11 +62,11 @@ export default function Cart({
         setAuditReport(data.text);
         setShowReportModal(true);
       } else {
-        alert("Clinical Audit Error: " + (data.error || "Could not complete audit. Please make sure the server is healthy."));
+        setErrorMsg("Clinical safety screening encountered an issue: " + (data.error || "Could not complete safety audit. Please verify standard internet protocols."));
       }
     } catch (err) {
       console.error(err);
-      alert("Network Error running safety audit. Make sure variables are configured.");
+      setErrorMsg("Network security path blocked. Let's make sure our environment keys are loaded.");
     } finally {
       setAuditLoading(false);
     }
@@ -172,6 +176,27 @@ export default function Cart({
         </p>
       </div>
 
+      {pendingConfirmOrderId && (
+        <div id="checkout-approval-banner" className="bg-amber-50 border-2 border-amber-200 rounded-3xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 shadow-sm animate-pulse">
+          <div className="space-y-1.5 text-left">
+            <div className="flex items-center gap-2 text-amber-800">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping inline-block" />
+              <span className="font-mono font-extrabold text-xs uppercase tracking-wider">AWAITING MANUALLY CONFIRMED STATUS</span>
+            </div>
+            <h4 className="text-sm font-black text-slate-900">
+              Checkout Transmitted & Pending Admin Approval
+            </h4>
+            <p className="text-xs text-slate-650 leading-relaxed font-semibold">
+              Your medication request has been successfully queued as ID <span className="font-mono text-amber-800 font-bold">#{pendingConfirmOrderId}</span>. It has been routed to the pharmacy admin dashboard and WhatsApp. Under localized safety policy, the cart is locked and remains active until a registered Bmedix pharmacist verifies and approves the order.
+            </p>
+          </div>
+          <div className="shrink-0 flex items-center gap-2 bg-amber-100/60 font-mono text-[10px] font-bold text-amber-900 border border-amber-200/50 px-3.5 py-2 rounded-2xl">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-700" />
+            <span>POLLING VERIFICATION</span>
+          </div>
+        </div>
+      )}
+
       {cartItems.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
@@ -272,7 +297,7 @@ export default function Cart({
                   <span className="font-mono text-blue-600 font-bold uppercase text-xs">FREE</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>H-Medix Localized Courier</span>
+                  <span>Bmedix Localized Courier</span>
                   <span className="font-mono text-slate-805 font-bold">₦2,000.00</span>
                 </div>
               </div>
@@ -314,6 +339,24 @@ export default function Cart({
                     </div>
                   )}
                 </div>
+
+                {errorMsg && (
+                  <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs text-red-700 flex gap-2 font-semibold relative leading-relaxed mb-4">
+                    <AlertTriangle className="w-5 h-5 shrink-0 text-red-600 mt-0.5" />
+                    <div className="pr-6">
+                      <p className="font-bold">Safety Screening Interrupted</p>
+                      <p className="text-[11px] text-red-600 mt-0.5">{errorMsg}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setErrorMsg(null)}
+                      className="absolute top-2 right-2 p-1 rounded-lg text-red-400 hover:text-red-700 hover:bg-red-100 transition cursor-pointer"
+                      title="Dismiss alert"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Audit trigger buttons */}
                 <button
@@ -394,7 +437,7 @@ export default function Cart({
                 </div>
                 <div>
                   <h4 className="font-sans font-black text-slate-900 text-base leading-none">Clinical Safety Audit Report</h4>
-                  <span className="text-[9px] uppercase font-mono tracking-wider text-slate-450 mt-1 block font-bold leading-none">Nurse Sarah, H-Medix Pharmacy</span>
+                  <span className="text-[9px] uppercase font-mono tracking-wider text-slate-450 mt-1 block font-bold leading-none">Nurse Sarah, Bmedix Pharmacy</span>
                 </div>
               </div>
               <button

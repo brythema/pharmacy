@@ -50,7 +50,7 @@ service cloud.firestore {
              data.id is string && data.id.size() <= 128 &&
              data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
              (data.total is int || data.total is float) && data.total >= 0.0 &&
-             data.status in ['Reviewing', 'Dispensed', 'Ready for Pickup', 'Out for Delivery', 'Delivered'] &&
+             data.status in ['Reviewing', 'Accepted', 'Prescription Requested', 'Rejected', 'Dispensed', 'Ready for Pickup', 'Out for Delivery', 'Delivered'] &&
              data.timestamp is string && data.timestamp.size() <= 100 &&
              data.patientName is string && data.patientName.size() <= 150;
     }
@@ -114,6 +114,17 @@ service cloud.firestore {
              (!('readAt' in data) || (data.readAt is int || data.readAt is float));
     }
 
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['id', 'timestamp', 'operatorEmail', 'orderId', 'patientName', 'action']) &&
+             data.id is string && data.id.size() <= 128 &&
+             data.timestamp is string && data.timestamp.size() <= 100 &&
+             data.operatorEmail is string && data.operatorEmail.size() <= 200 &&
+             data.orderId is string && data.orderId.size() <= 128 &&
+             data.patientName is string && data.patientName.size() <= 150 &&
+             data.action is string && data.action.size() <= 100 &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 1000));
+    }
+
     // 4. Secure Path Definition Blocks
 
     // Notifications
@@ -133,7 +144,7 @@ service cloud.firestore {
 
     // Inventory List (Clinical Drugs Catalog)
     match /inventory/{drugId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidDrug(request.resource.data);
       allow delete: if isAdmin();
     }
@@ -220,13 +231,18 @@ service cloud.firestore {
 
     // Support Helpdesk System
     match /support_rooms/{roomId} {
-      allow get, list: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow get, list: if isSignedIn() && (isAdmin() || (resource != null && resource.data.userId == request.auth.uid));
       allow create: if isSignedIn() && isValidId(roomId) && (request.resource.data.userId == request.auth.uid || isAdmin()) && isValidSupportRoom(request.resource.data);
       allow update: if isSignedIn() && isValidId(roomId) && (resource.data.userId == request.auth.uid || isAdmin()) && isValidSupportRoom(request.resource.data);
       allow delete: if isAdmin();
 
       match /messages/{messageId} {
-        allow read, list: if isSignedIn() && (get(/databases/$(database)/documents/support_rooms/$(roomId)).data.userId == request.auth.uid || isAdmin());
+        allow read, list: if isSignedIn() && (
+          isAdmin() || (
+            exists(/databases/$(database)/documents/support_rooms/$(roomId)) && 
+            get(/databases/$(database)/documents/support_rooms/$(roomId)).data.userId == request.auth.uid
+          )
+        );
         allow create: if isSignedIn() && isValidId(messageId) && (request.resource.data.senderId == request.auth.uid || isAdmin()) && isValidSupportMessage(request.resource.data);
         allow update, delete: if isAdmin();
       }
@@ -236,6 +252,13 @@ service cloud.firestore {
     match /admins/{userId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && ((userId == request.auth.uid && 'email' in request.auth.token && request.auth.token.email != null && request.auth.token.email.lower() == 'brythema@gmail.com') || isAdmin());
+    }
+
+    // Clinical Audit Logs
+    match /audit_logs/{logId} {
+      allow read, list: if isSignedIn() && isAdmin();
+      allow create: if isSignedIn() && isAdmin() && isValidId(logId) && isValidAuditLog(request.resource.data);
+      allow update, delete: if isAdmin();
     }
 
   }

@@ -192,7 +192,7 @@ export default function ProfilePanel({
               </label>
               <input
                 type="tel"
-                placeholder="e.g., 08123456789 or +234..."
+                placeholder="e.g., 07042776167 or +234..."
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
                 className="w-full px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-205 focus:bg-white focus:ring-1 focus:ring-blue-500 focus:outline-none text-sm text-slate-800 transition-all shadow-sm placeholder-slate-400"

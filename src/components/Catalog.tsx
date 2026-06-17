@@ -204,7 +204,7 @@ export default function Catalog({ onAddToCart, onInquireSafety, profile, onOpenP
           
           {/* Welcome Specialty Banner */}
           <div className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-md">
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 font-black text-8xl select-none hidden md:block tracking-tighter">H-MEDIX</div>
+            <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-10 font-black text-8xl select-none hidden md:block tracking-tighter">BMEDIX</div>
             <div className="relative z-10 max-w-3xl">
               <span className="bg-white/20 text-white text-[9px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full font-mono">
                 Browse Directory
@@ -238,13 +238,22 @@ export default function Catalog({ onAddToCart, onInquireSafety, profile, onOpenP
               return (
                 <div
                   key={cat}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Explore specialty ${cat}`}
                   onClick={() => setCategory(cat)}
-                  className={`group relative flex flex-col justify-between overflow-hidden bg-white border ${meta.borderColor} rounded-3xl p-6 transition-all duration-300 hover:shadow-xl cursor-pointer ${meta.spanClass}`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setCategory(cat);
+                    }
+                  }}
+                  className={`group relative flex flex-col justify-between overflow-hidden bg-white border ${meta.borderColor} rounded-3xl p-6 transition-[border-color,background-color,box-shadow] duration-300 hover:shadow-xl cursor-pointer ${meta.spanClass}`}
                 >
-                  <div>
+                  <div className="relative">
                     {/* Header: Title and count */}
                     <div className="flex items-center justify-between gap-4">
-                      <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${meta.bgGradient} flex items-center justify-center text-3xl group-hover:scale-110 transition-transform duration-300 shadow-sm`}>
+                      <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${meta.bgGradient} flex items-center justify-center text-3xl group-hover:scale-105 transition-transform duration-300 transform-gpu shadow-sm`}>
                         {meta.emoji}
                       </div>
 
@@ -263,20 +272,20 @@ export default function Catalog({ onAddToCart, onInquireSafety, profile, onOpenP
 
                     {/* Dynamic Popular preview chips targeting: "like pain killers would have paracetamol, cocodamol..." */}
                     <div className="mt-5 pt-4 border-t border-slate-150">
-                      <p className="text-[9px] text-slate-405 font-bold uppercase tracking-wider font-mono mb-2">
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider font-mono mb-2">
                         Common medications:
                       </p>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
                         {catDrugs.slice(0, 3).map(d => (
                           <span
                             key={d.id}
-                            className="text-[10px] bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg text-slate-700 font-semibold shadow-sm hover:border-slate-300 transition"
+                            className="text-[10px] bg-slate-50 border border-slate-100 px-2.5 py-1 rounded-lg text-slate-700 font-semibold shadow-sm hover:border-slate-350 transition-colors shrink-0 whitespace-nowrap"
                           >
                             {d.image} {d.name.replace(/\s*(?:Tablet|Capsule|Suspension|mg|ml|\d).*$/gi, '')}
                           </span>
                         ))}
                         {catDrugs.length > 3 && (
-                          <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-lg flex items-center">
+                          <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-1 rounded-lg flex items-center shrink-0 whitespace-nowrap">
                             +{catDrugs.length - 3} more
                           </span>
                         )}
@@ -286,7 +295,7 @@ export default function Catalog({ onAddToCart, onInquireSafety, profile, onOpenP
 
                   {/* Actions & expand visualizer info */}
                   <div className="mt-6 pt-3 flex items-center justify-between text-xs font-bold border-t border-slate-50">
-                    <span className={`${meta.accentText} uppercase tracking-wider font-mono text-[10px] flex items-center gap-1 group-hover:translate-x-1 transition-transform`}>
+                    <span className={`${meta.accentText} uppercase tracking-wider font-mono text-[10px] flex items-center gap-1 group-hover:translate-x-1.5 transition-transform duration-300 transform-gpu`}>
                       Explore specialty &rarr;
                     </span>
                     <button type="button" className="h-7 w-7 rounded-sm bg-slate-50 group-hover:bg-blue-600 group-hover:text-white transition flex items-center justify-center border border-slate-205">
@@ -465,7 +474,7 @@ export default function Catalog({ onAddToCart, onInquireSafety, profile, onOpenP
               <AlertCircle className="w-8 h-8" />
               <div>
                 <h4 className="font-extrabold text-slate-900 text-lg">Rx Prescription Required</h4>
-                <p className="text-[10px] uppercase font-mono tracking-wider font-semibold text-amber-600">H-Medix Regulations</p>
+                <p className="text-[10px] uppercase font-mono tracking-wider font-semibold text-amber-600">Bmedix Regulations</p>
               </div>
             </div>
 

@@ -93,7 +93,7 @@ export default function SupportMessaging({
   const [roomFilter, setRoomFilter] = useState<"all" | "open" | "closed" | "unread">("all");
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pharmacyName = tenantConfig?.pharmacyName || "H-Medix Support";
+  const pharmacyName = tenantConfig?.pharmacyName || "Bmedix Support";
   const pharmacyId = activePharmacyId || "default";
 
   // 1. Sync Patient's Support Rooms

@@ -40,7 +40,7 @@ export default function Navbar({
   showInstallButton,
   onInstall,
 }: NavbarProps) {
-  const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+  const pharmacyName = tenantConfig?.pharmacyName || "Bmedix";
   const logoUrl = tenantConfig?.logoUrl || "";
 
   const [unreadSupportCount, setUnreadSupportCount] = useState(0);

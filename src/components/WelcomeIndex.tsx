@@ -1,5 +1,7 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { auth } from "../firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
 import { 
   HeartPulse, 
   ShieldCheck, 
@@ -35,7 +37,7 @@ interface WelcomeIndexProps {
 }
 
 export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentials, tenantConfig }: WelcomeIndexProps) {
-  const pharmacyName = tenantConfig?.pharmacyName || "H-Medix";
+  const pharmacyName = tenantConfig?.pharmacyName || "Bmedix";
   const nurseName = tenantConfig?.nurseName || "Nurse Sarah";
 
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -45,6 +47,26 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
   const [fullName, setFullName] = useState<string>("");
   const [phoneNumber, setPhoneNumber] = useState<string>("");
   const [agreeTerms, setAgreeTerms] = useState<boolean>(true);
+
+  // Brute-force Login Mitigation Lockout states
+  const [failedAttempts, setFailedAttempts] = useState<number>(0);
+  const [lockoutSecs, setLockoutSecs] = useState<number>(0);
+
+  // Lockout decrementation effect
+  React.useEffect(() => {
+    if (lockoutSecs <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutSecs((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setFailedAttempts(0);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutSecs]);
 
   // Informative/Validation state
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -124,6 +146,11 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
     e.preventDefault();
     if (isBusy) return;
 
+    if (lockoutSecs > 0) {
+      setValidationError(`⚠️ ACCESS PORTAL LOCKED: Too many failed attempts. Try again in ${lockoutSecs}s.`);
+      return;
+    }
+
     if (!validateForm()) return;
 
     setIsBusy(true);
@@ -144,10 +171,51 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
         setMode("login");
         setPassword("");
         setConfirmPassword("");
+        setFailedAttempts(0);
+      } else {
+        // Success login clears attempts
+        setFailedAttempts(0);
       }
     } catch (err: any) {
       const msg = err.message || "An unexpected validation exception occurred. Please verify your connection.";
       setValidationError(msg);
+      
+      if (mode === "login") {
+        setFailedAttempts((prev) => {
+          const nextCount = prev + 1;
+          if (nextCount >= 5) {
+            setLockoutSecs(60);
+          }
+          return nextCount;
+        });
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (isBusy) return;
+    setValidationError(null);
+    setSuccessMsg(null);
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setValidationError("Please input your registered email address first to dispatch password reset.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setValidationError("Please enter a valid email address format (e.g. name@domain.com).");
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await sendPasswordResetEmail(auth, trimmedEmail);
+      setSuccessMsg(`🔐 Secure Key Reset dispatched! Check inbox: "${trimmedEmail}" for clinical recovery steps.`);
+    } catch (err: any) {
+      console.error(err);
+      setValidationError(err.message || "Failed to trigger recovery dispatch. Verify matching email.");
     } finally {
       setIsBusy(false);
     }
@@ -496,9 +564,21 @@ export default function WelcomeIndex({ onSignInWithGoogle, onSignInWithCredentia
 
               {/* Password field */}
               <div>
-                <label className="block text-[10px] font-mono font-bold uppercase text-slate-450 mb-1.5">
-                  Secure Password <span className="text-red-500">*</span>
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-[10px] font-mono font-bold uppercase text-slate-450">
+                    Secure Password <span className="text-red-500">*</span>
+                  </label>
+                  {mode === "login" && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      disabled={isBusy}
+                      className="text-[10px] font-mono uppercase font-bold text-blue-600 hover:text-blue-800 focus:outline-none transition cursor-pointer"
+                    >
+                      Forgot Access Key?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
                     <Lock className="w-4 h-4" />
